@@ -65,7 +65,7 @@ Before a thesis-scale job:
 
 1. Validate YAML and all checkpoint paths.
 2. Run the CPU mock configuration against a short real clip.
-3. Run each real model on a short artifact with one GPU (tests marked `gpu` are reserved for this).
+3. Follow the one-GPU procedure in [server.md](../server.md) to run each real model on a short artifact.
 4. Inspect the artifact and archive manifests.
 5. Run the full experiment, preserving the YAML, result manifests, Parquet files, and runner logs.
 

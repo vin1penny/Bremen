@@ -46,7 +46,7 @@ docker build -f containers/Dockerfile.openpose -t football-pose-openpose .
 
 `runners/container-runner.sh` forwards the orchestrator's per-shard GPU assignment and mounts the repository at the same absolute path inside each container. The exact runtime command remains YAML data, so a server may instead point it at a model-specific virtual environment, Apptainer wrapper, or scheduler command.
 
-See [docs/architecture.md](./docs/architecture.md) for data contracts, extension points, recovery behavior, and the server layout. Metric calculation is deliberately left downstream of the validated Parquet archives and is recorded in [TODOS.md](./TODOS.md) until the DFL/Werder ground-truth format and synchronization are fixed.
+See [docs/architecture.md](./docs/architecture.md) for data contracts, extension points, recovery behavior, and the server layout. The step-by-step [Lyra server runbook](./server.md) records the connection details, repository and storage locations, safe tests, GPU policy, and full-run procedure. Metric calculation is deliberately left downstream of the validated Parquet archives and is recorded in [TODOS.md](./TODOS.md) until the DFL/Werder ground-truth format and synchronization are fixed.
 
 
 ### Table of Contents
