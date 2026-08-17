@@ -25,4 +25,3 @@ RUN python3 -m pip install --no-cache-dir -r requirements/openpose.txt
 COPY src src
 COPY runners/openpose runners/openpose
 ENTRYPOINT ["python3", "runners/openpose/run.py"]
-

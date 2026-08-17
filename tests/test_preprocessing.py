@@ -69,4 +69,3 @@ def test_crop_after_resize_returns_original_frame_coordinates(packet: FramePacke
     assert output.track_id == "7"
     assert output.source_bbox == pytest.approx((2.0, 2.5, 10.0, 12.5))
     np.testing.assert_allclose(output.points_to_source([[0, 0]]), [[2, 2.5]])
-

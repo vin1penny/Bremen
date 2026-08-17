@@ -12,4 +12,3 @@ RUN python3 -m pip install --no-cache-dir -r requirements/yolo.txt
 COPY src src
 COPY runners/yolo runners/yolo
 ENTRYPOINT ["python3", "runners/yolo/run.py"]
-

@@ -66,4 +66,3 @@ def test_artifact_sharding_is_disjoint_and_complete(tmp_path: Path) -> None:
     shards = [list(iter_artifact(path, shard_index=index, shard_count=3)) for index in range(3)]
     indexes = [[packet.frame_index for packet in shard] for shard in shards]
     assert indexes == [[0, 3, 6], [1, 4], [2, 5]]
-

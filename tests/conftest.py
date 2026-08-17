@@ -26,4 +26,3 @@ def tiny_video(tmp_path: Path) -> Path:
         for packet in stream.encode():
             container.mux(packet)
     return path
-
