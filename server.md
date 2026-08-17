@@ -13,7 +13,8 @@ This is the durable reference for connecting to Lyra, locating the project, test
 | GitHub repository | `https://github.com/vin1penny/Bremen.git` |
 | Working branch | `codex/modular-football-pipeline` |
 | Local Mac repository | `/Users/larry/Bremen/FootballTrackingDataGeneration-main` |
-| Regenerable server cache | `/lyra/cache/vincent/football-pose/artifacts` |
+| Regenerable server cache (current fallback) | `/home/vincent/football-pose-cache/artifacts` |
+| Preferred shared cache (not yet provisioned) | `/lyra/cache/vincent/football-pose/artifacts` |
 | Suggested private-data root | `/home/vincent/football-pose-private` |
 | Suggested results root | `/home/vincent/football-pose-results` |
 
@@ -35,6 +36,10 @@ Recorded on 2026-08-17. Recheck before diagnosing a future environment problem.
 | Driver-reported CUDA compatibility | 12.9 |
 | `nvitop` | Not installed; use `nvidia-smi` |
 | `/lyra` snapshot | 2.1 TB total, 226 GB available, 90% used |
+| Root filesystem snapshot | 94 GB total, 1.4 GB available, 99% used |
+| `/home` snapshot | 4.7 TB total, 224 GB available, 96% used |
+| Built YOLO image | `vincent/football-pose-yolo:dev` (9.84 GB) |
+| Verified YOLO packages | PyTorch 2.5.1+cu124, Ultralytics 8.4.19, OpenCV 4.10.0, PyAV 14.2.0 |
 
 The CUDA number printed by `nvidia-smi` describes the driver's maximum compatible CUDA version. Each model container supplies its own pinned CUDA runtime.
 
@@ -120,10 +125,18 @@ Keep private and durable data outside the Git clone. This reduces the risk of co
 ```bash
 mkdir -p /home/vincent/football-pose-private/footage
 mkdir -p /home/vincent/football-pose-private/checkpoints
+mkdir -p /home/vincent/football-pose-private/configs
 mkdir -p /home/vincent/football-pose-results
-mkdir -p /lyra/cache/vincent/football-pose/artifacts
+mkdir -p /home/vincent/football-pose-cache/artifacts
+mkdir -p /home/vincent/.cache/football-pose/pip-tmp
+mkdir -p /home/vincent/.cache/football-pose/ultralytics
 chmod 700 /home/vincent/football-pose-private
 ```
+
+Creating `/lyra/cache/vincent/...` currently fails with `Permission denied`. Use the
+home-based cache above until an administrator provisions a writable directory on
+`/lyra/cache`; then update experiment YAML explicitly. The home fallback avoids the
+nearly full root filesystem, but it is not proof that the data is backed up.
 
 | Data | Location | Git-backed? | Regenerable? |
 | --- | --- | --- | --- |
@@ -131,15 +144,18 @@ chmod 700 /home/vincent/football-pose-private
 | Private footage | `/home/vincent/football-pose-private/footage` | No | Usually no |
 | Unique checkpoints | `/home/vincent/football-pose-private/checkpoints` | No | Usually no |
 | Parquet, manifests, logs | `/home/vincent/football-pose-results` | No | Expensive to reproduce |
-| Preprocessed artifacts | `/lyra/cache/vincent/football-pose/artifacts` | No | Yes |
+| Preprocessed artifacts | `/home/vincent/football-pose-cache/artifacts` | No | Yes |
 
 Check space before large jobs:
 
 ```bash
-df -h /home/vincent /lyra/cache
-quota -s
+df -h / /tmp /home/vincent /lyra
+df -i / /tmp /home/vincent /lyra
 docker system df
 ```
+
+The `quota` command is not installed on Lyra. Ask the administrator about any
+account or ZFS quota that is not visible through `df`.
 
 Never run `docker system prune` on the shared Docker installation.
 
@@ -171,6 +187,13 @@ sha256sum /home/vincent/football-pose-private/checkpoints/*
 
 Do not put secrets, private footage, or unique weights into Git. The modular inference pipeline does not need a Roboflow API key unless a separate training or Roboflow notebook is used.
 
+The YOLO Pose checkpoint already present in the Mac clone can be transferred with:
+
+```bash
+scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/train/yolov8x-pose.pt \
+  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
+```
+
 ## 6. Create the Python environment
 
 On Lyra, from the repository root:
@@ -180,13 +203,28 @@ cd /home/vincent/projects/Bremen
 python3.12 -m venv .venv
 source .venv/bin/activate
 
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
+
 python -m pip install --upgrade pip
-python -m pip install \
-  -r requirements/dev.txt \
-  -r requirements/orchestrator.txt
+python -m pip install --resume-retries 20 -r requirements/dev.txt
 
 export PYTHONPATH="$PWD/src"
 ```
+
+Install the smaller development environment first and run the CPU checks in the
+next section. Only after those pass, install the heavier host dependencies used by
+crop detection and model orchestration:
+
+```bash
+python -m pip install --resume-retries 20 -r requirements/orchestrator.txt
+python -m pip check
+```
+
+PyTorch is a roughly 906 MB download. `TMPDIR` must not point at `/tmp`, because
+`/tmp` is on the nearly full root filesystem. `--resume-retries 20` makes an
+interrupted download retry without changing package versions.
 
 Reactivate this environment after reconnecting:
 
@@ -194,6 +232,9 @@ Reactivate this environment after reconnecting:
 cd /home/vincent/projects/Bremen
 source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
 ```
 
 ## 7. Run the safe CPU checks
@@ -202,42 +243,63 @@ These commands do not require a GPU reservation:
 
 ```bash
 python -m pip check
-pytest -q
+python -m pytest -q
 python -m football_pose list-processors
 python -m football_pose validate-config configs/mock.yaml
 python -m football_pose run configs/mock.yaml
 python -m football_pose run configs/mock.yaml
 ```
 
-Expected unit-test result at the time this runbook was created:
+Expected unit-test result after pulling this runbook's YOLO smoke-test update:
 
 ```text
-16 passed
+18 passed
 ```
 
-The second mock run should report a cache hit and reuse the completed mock-model job. This checks video decoding, preprocessing, caching, runner orchestration, validation, Parquet output, and resume behavior without using CUDA.
+The earlier server run on the preceding revision passed all 16 tests. Its cold mock
+run processed 782 frames successfully, and the second run reported
+`"cache_hit": true` with about 0.067 seconds of preprocessing wall time. This checks
+video decoding, preprocessing, caching, runner orchestration, validation, Parquet
+output, and resume behavior without using CUDA.
 
-## 8. Build the model containers
+## 8. Build and verify the YOLO container
 
-Container builds do not require a GPU reservation, but they use CPU, network, Docker storage, and time. Check server policy and disk space first.
+Docker packages the YOLO runner, CUDA runtime, Python, and pinned libraries into one
+reproducible image. The host orchestrator remains in `.venv`; it launches the image
+through `runners/container-runner.sh` and mounts only the required artifact,
+checkpoint, output directory, and repository.
+
+Container builds do not require a GPU reservation, but they use CPU, network, shared
+Docker storage, and time. Prefix image names with the Lyra username so they do not
+collide with another user's images.
 
 ```bash
 docker build \
   -f containers/Dockerfile.yolo \
-  -t football-pose-yolo .
-
-docker build \
-  -f containers/Dockerfile.hrnet \
-  -t football-pose-hrnet .
+  -t vincent/football-pose-yolo:dev .
 ```
 
-The OpenPose Dockerfile currently compiles with `make -j$(nproc)`, which can use all 64 server CPUs. Do not run that build unchanged until this resource use is approved or the Dockerfile has been changed to support a safe build limit.
+This image has already built successfully on Lyra. The Python 3.10 container uses
+NumPy 2.2.6 because NumPy 2.3+ requires Python 3.11; the version marker is tested in
+the repository. Do not build HRNet or OpenPose yet. First complete the YOLO hardware
+smoke test below.
 
-Verify images without changing shared Docker state:
+Verify the image without reserving a GPU:
 
 ```bash
-docker image ls | grep football-pose
+docker image ls vincent/football-pose-yolo
+
+docker run --rm \
+  --entrypoint python3 \
+  vincent/football-pose-yolo:dev \
+  -c "import torch, ultralytics, cv2, av; print('torch:', torch.__version__); print('ultralytics:', ultralytics.__version__); print('opencv:', cv2.__version__); print('pyav:', av.__version__)"
+
+docker run --rm vincent/football-pose-yolo:dev --help
 ```
+
+Both checks have passed on Lyra. Ultralytics may say that `/root/.config` is not
+writable and use `/tmp/Ultralytics` inside the disposable container. That warning is
+harmless for this runner because each container is removed after its shard finishes.
 
 ## 9. Follow the shared GPU reservation policy
 
@@ -262,110 +324,147 @@ Also monitor host resources:
 
 ```bash
 free -h
-df -h /home/vincent /lyra/cache
+df -h / /tmp /home/vincent /lyra
 ```
 
-## 10. Create a one-GPU test configuration
+## 10. Prepare the tracked YOLO-only smoke test
 
-Copy the tracked template:
+Pull the current branch, then copy the tracked smoke template outside the repository
+so inserting the reserved GPU ID does not create a Git change:
 
 ```bash
-cp configs/server-three-models.yaml configs/server-one-gpu-test.yaml
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+
+cp configs/lyra-yolo-one-gpu.yaml \
+  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
 ```
 
-Edit `configs/server-one-gpu-test.yaml` and use absolute paths such as:
+The template deliberately tests only YOLO Pose with the tracked 30-second sample,
+`resize`, and `clahe`. It does not enable crop detection, HRNet, or OpenPose. This
+isolates the first real model and reuses the two preprocessing stages already proven
+by the CPU mock run.
 
-```yaml
-input: /home/vincent/football-pose-private/footage/test-video.mp4
-output_dir: /home/vincent/football-pose-results/one-gpu-test
+Confirm the checkpoint exists:
 
-cache:
-  root: /lyra/cache/vincent/football-pose/artifacts
+```bash
+ls -lh /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+sha256sum /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
 ```
 
-Use these checkpoint locations:
+Validate and materialize the lossless artifact. These commands are CPU-only because
+this configuration has no `crop` processor, so they do not require a GPU
+reservation:
 
-```yaml
-detector:
-  checkpoint: /home/vincent/football-pose-private/checkpoints/player.pt
+```bash
+python -m football_pose validate-config \
+  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
+
+python -m football_pose run \
+  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml \
+  --prepare-only
 ```
 
-```yaml
-checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+Expect `"success": true`, 782 frames, and an FFV1 artifact path under
+`/home/vincent/football-pose-cache/artifacts`.
+
+## 11. Reserve one GPU and set the same ID in both places
+
+Follow the semaphore procedure in section 9. After a physical GPU is assigned, edit
+the private YAML:
+
+```bash
+nano /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
 ```
 
-```yaml
-checkpoint: /home/vincent/football-pose-private/checkpoints/hrnet-w32.pth
-```
-
-For a reserved physical GPU such as GPU 2, every model must use:
+Replace the placeholder with the assigned physical ID. For example only, if the
+semaphore assigned GPU 2:
 
 ```yaml
 devices: [2]
 ```
 
-Use conservative test batches:
-
-- YOLO Pose: `batch_size: 8`
-- HRNet-W32: `batch_size: 8`
-- OpenPose: `batch_size: 1`
-- All: `min_batch_size: 1`
-
-The example GPU number is not a recommendation. Use only the ID currently assigned in the semaphore.
-
-## 11. Validate and prepare the short experiment
-
-After reserving one GPU, export the same physical ID. Example only:
+Export the identical ID in the shell:
 
 ```bash
 export CUDA_VISIBLE_DEVICES=2
 ```
 
-Validate all configured paths before doing expensive work:
+The example ID is not a recommendation. Do not continue unless it is the GPU actually
+assigned in the shared semaphore.
+
+Confirm that Docker can see exactly one A100:
 
 ```bash
-python -m football_pose validate-config configs/server-one-gpu-test.yaml
+docker run --rm \
+  --gpus "device=${CUDA_VISIBLE_DEVICES}" \
+  --entrypoint python3 \
+  vincent/football-pose-yolo:dev \
+  -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('visible GPUs:', torch.cuda.device_count()); print('GPU 0:', torch.cuda.get_device_name(0))"
 ```
 
-Prepare and cache the processed short video:
+Expected essentials:
+
+- `CUDA available: True`
+- `visible GPUs: 1`
+- `GPU 0: NVIDIA A100-SXM4-40GB`
+
+If this fails, release the reservation after diagnosis and do not start inference.
+
+## 12. Run YOLO Pose on the short artifact
+
+Run from the repository root while the reservation and export are still active:
 
 ```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
+
 python -m football_pose run \
-  configs/server-one-gpu-test.yaml \
-  --prepare-only
-```
-
-The crop preprocessor uses the reserved GPU, so preparation also requires a reservation when `crop` is enabled.
-
-## 12. Test each real model on one GPU
-
-Run the three models separately on the short cached artifact:
-
-```bash
-python -m football_pose run \
-  configs/server-one-gpu-test.yaml \
+  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml \
   --model yolo-pose
-
-python -m football_pose run \
-  configs/server-one-gpu-test.yaml \
-  --model hrnet-w32
-
-python -m football_pose run \
-  configs/server-one-gpu-test.yaml \
-  --model openpose-body25
 ```
 
-Require the following before scaling up:
+Open a second SSH session to monitor the reserved GPU:
 
-- The command exits successfully.
-- The summary reports `"success": true`.
-- The model job reports `COMPLETE`.
+```bash
+watch -n 2 nvidia-smi
+```
+
+The initial batch is 8. If a CUDA OOM occurs, the orchestrator automatically retries
+the complete YOLO attempt with batches 4, 2, and then 1.
+
+The smoke test passes only when all of these are true:
+
+- The command exits with code 0.
+- The summary reports `"success": true` and `"cache_hit": true`.
+- The YOLO job reports `"status": "COMPLETE"`.
 - `predictions.parquet` and `manifest.json` exist.
-- Shard stderr logs contain no unexplained errors.
+- The runner stderr log has no unexplained exception.
 
-## 13. Run the full serial, multi-GPU experiment
+Inspect the output without guessing its generated job ID:
 
-Only continue after all one-GPU model tests pass.
+```bash
+find /home/vincent/football-pose-results/yolo-one-gpu-smoke \
+  -type f \
+  -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
+  | sort
+```
+
+Release the semaphore reservation immediately after the run finishes or fails.
+
+## 13. Stop here before adding the other models
+
+Do not build or run HRNet or OpenPose until the YOLO summary and runner logs have been
+reviewed. After YOLO passes, the next milestone is a crop-enabled YOLO comparison on
+the same short clip. Only then add the other pose models and scale to multiple GPUs.
+
+## 14. Later: run the full serial, multi-GPU experiment
+
+Only continue after the staged one-GPU tests pass.
 
 1. Copy the one-GPU YAML to a new, descriptive full-run YAML.
 2. Change the input and output paths.
@@ -395,7 +494,7 @@ tmux attach -t thesis-pose
 
 The orchestrator runs YOLO Pose, HRNet-W32, and OpenPose serially. Within each model, work is sharded across all configured GPUs. CUDA out-of-memory failures automatically restart the complete model attempt with half the batch size until `min_batch_size` is reached.
 
-## 14. Find outputs and logs
+## 15. Find outputs and logs
 
 For the suggested external results root:
 
@@ -418,7 +517,7 @@ Inspect a cached artifact using the path printed by the preparation command:
 
 ```bash
 python -m football_pose inspect-artifact \
-  /lyra/cache/vincent/football-pose/artifacts/ARTIFACT_ID \
+  /home/vincent/football-pose-cache/artifacts/ARTIFACT_ID \
   --count-frames
 ```
 
@@ -430,7 +529,7 @@ scp -r \
   /local/backup/destination/
 ```
 
-## 15. Save server-side code changes
+## 16. Save server-side code changes
 
 Before editing:
 
@@ -452,7 +551,7 @@ git push
 
 Never use `git add .` when private data or generated outputs may be present. Never commit model weights, source footage, secrets, cache artifacts, Parquet results, or runner logs.
 
-## 16. Daily start and finish checklist
+## 17. Daily start and finish checklist
 
 At the start:
 
@@ -463,6 +562,9 @@ git status --short --branch
 git pull --ff-only
 source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
 ```
 
 Before GPU work:
@@ -491,6 +593,31 @@ Check the username, VPN, password, SSH key, and whether Lyra requires a specific
 
 Do not use `sudo` as a workaround. Ask the administrator for the supported Docker or Apptainer workflow.
 
+### `No space left on device` while pip downloads PyTorch
+
+Confirm `tempfile.gettempdir()` is not `/tmp`, then retry with the home-based
+temporary directory:
+
+```bash
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+python -c "import tempfile; print(tempfile.gettempdir())"
+python -m pip install --resume-retries 20 -r requirements/orchestrator.txt
+```
+
+Do not delete shared Docker data to solve a pip temporary-file problem.
+
+### Ultralytics says its config directory is not writable
+
+For the host environment, export the user-owned directory documented in section 6.
+The same warning inside a disposable YOLO container is harmless because it falls back
+to `/tmp/Ultralytics`.
+
+### YOLO image build cannot install `numpy==2.3.5`
+
+Pull commit `677cec8` or later. The CUDA Ubuntu 22.04 image has Python 3.10 and must
+select the conditional NumPy 2.2.6 pin from `requirements/yolo.txt`.
+
 ### GPU reservation error from the orchestrator
 
 The physical IDs in YAML do not match `CUDA_VISIBLE_DEVICES`. Compare both with the semaphore reservation.
@@ -515,6 +642,7 @@ First confirm that no process is writing that exact artifact. Do not delete lock
 
 - [README.md](README.md) - project setup and modular-pipeline overview
 - [docs/architecture.md](docs/architecture.md) - contracts, artifacts, recovery, and GPU scheduling
+- [configs/lyra-yolo-one-gpu.yaml](configs/lyra-yolo-one-gpu.yaml) - tracked YOLO-only Lyra smoke-test template
 - [configs/server-three-models.yaml](configs/server-three-models.yaml) - tracked three-model configuration template
 - [TODOS.md](TODOS.md) - deferred evaluation work
 

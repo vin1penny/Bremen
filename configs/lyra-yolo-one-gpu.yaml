@@ -1,0 +1,37 @@
+name: lyra-yolo-one-gpu-smoke
+input: /home/vincent/projects/Bremen/footage/sample_30.mov
+output_dir: /home/vincent/football-pose-results/yolo-one-gpu-smoke
+
+# Keep the first GPU test intentionally small and independent of the crop detector.
+# These are the same preprocessing stages already exercised by configs/mock.yaml.
+processors:
+  - type: resize
+    params:
+      width: 960
+      interpolation: lanczos
+  - type: clahe
+    params:
+      clip_limit: 2.0
+      tile_grid: [8, 8]
+
+# /lyra/cache/vincent is not writable yet. Move this only after an administrator
+# provisions a user-owned cache directory there.
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: ffv1
+  shard_size: 256
+  pin: true
+
+models:
+  - id: yolo-pose
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-yolo:dev
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+    batch_size: 8
+    min_batch_size: 1
+    # Replace 0 in the private copy with the physical GPU assigned in Lyra's
+    # semaphore, then export the identical ID through CUDA_VISIBLE_DEVICES.
+    devices: [0]
+    timeout_seconds: 3600
