@@ -1,0 +1,67 @@
+name: thesis-three-model-comparison
+input: ../footage/sample_30.mov
+output_dir: ../experiment-output/three-models
+
+# The list order is the processing order. Add, remove, or reorder registered
+# processors to define an ablation. Insert `crop` wherever detection should occur.
+processors:
+  - type: resize
+    params:
+      width: 1920
+      interpolation: lanczos
+  - type: clahe
+    params:
+      clip_limit: 2.0
+      tile_grid: [8, 8]
+  - type: crop
+    params:
+      padding_ratio: 0.10
+      min_size: 32
+      detector:
+        checkpoint: ../models/player.pt
+        confidence: 0.30
+        # collab/player.pt: 0=ball, 1=goalkeeper, 2=player, 3=referee
+        class_ids: [1, 2, 3]
+        track: true
+
+cache:
+  # On the shared server, change this to your regenerable cache directory,
+  # e.g. /lyra/cache/YOUR_USERNAME/football-pose/artifacts.
+  root: ../artifacts
+  format: auto
+  shard_size: 256
+  pin: true
+
+# Models run in this order. Within each model, one shard process is launched per
+# listed GPU. Use only the physical IDs reserved in the semaphore document and
+# export the exact same IDs through CUDA_VISIBLE_DEVICES before launching.
+models:
+  - id: yolo-pose
+    command: [bash, runners/container-runner.sh, football-pose-yolo]
+    checkpoint: ../train/yolov8x-pose.pt
+    batch_size: 64
+    min_batch_size: 1
+    devices: [0, 1, 2, 3]
+    timeout_seconds: 86400
+
+  - id: hrnet-w32
+    command:
+      - bash
+      - runners/container-runner.sh
+      - football-pose-hrnet
+      - --pose-config
+      - td-hm_hrnet-w32_8xb64-210e_coco-256x192
+      - --det-model
+      - whole_image
+    checkpoint: ../models/hrnet-w32.pth
+    batch_size: 64
+    min_batch_size: 1
+    devices: [0, 1, 2, 3]
+    timeout_seconds: 86400
+
+  - id: openpose-body25
+    command: [bash, runners/container-runner.sh, football-pose-openpose]
+    batch_size: 1
+    min_batch_size: 1
+    devices: [0, 1, 2, 3]
+    timeout_seconds: 86400

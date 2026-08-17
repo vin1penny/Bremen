@@ -1,0 +1,7 @@
+gdown==5.2.1
+inference==1.0.2
+python-dotenv==1.0.1
+roboflow==1.1.47
+scikit-learn==1.5.2
+sports @ git+https://github.com/roboflow/sports.git@42c80c06b6b65a7f89455b89fe31cdf4c38ba227
+yolov5==7.0.13

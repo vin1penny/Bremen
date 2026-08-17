@@ -2,6 +2,52 @@
 Convert football match footage into proffesional level player & ball tracking data utilizing [Roboflow's](https://roboflow.com/) machine learning and computer vision libraries. The goal of this project is to enable clubs at any level to turn their match footage into match tracking data and match event data, which they can use to step their match analysis to the next level!
 ![Tracking Example](./examples/tracking.png)
 
+## Modular pose-experiment pipeline
+
+The repository now includes a configuration-driven pipeline for the master-thesis experiments. It accepts any PyAV-readable video (MP4, MOV, MKV, and similar), applies an ordered list of interchangeable preprocessing steps, caches the processed frames losslessly, and runs isolated pose-model commands. Every runner writes the same validated COCO-17 schema in original-video coordinates; the durable result is a Zstandard-compressed Parquet archive plus provenance.
+
+The intended server schedule is **stage-serial and GPU-parallel**: YOLO Pose finishes first using all configured GPUs, then HRNet-W32 uses all GPUs, then OpenPose does the same. Frame/crop indices are deterministically sharded across those GPUs and merged afterward. If any shard reports a CUDA OOM, the whole model attempt is restarted with half the batch size.
+
+### Local setup and smoke run
+
+Python 3.12 is used by the new package:
+
+```shell
+python3.12 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements/dev.txt
+export PYTHONPATH="$PWD/src"
+python -m football_pose validate-config configs/mock.yaml
+python -m football_pose list-processors
+python -m football_pose run configs/mock.yaml
+```
+
+The smoke configuration uses a deterministic fake model, so it tests the complete contract without a GPU. Outputs are written below `experiment-output/`; content-addressed input artifacts are written below `artifacts/`. Re-running an unchanged experiment reuses both a valid cache artifact and completed model jobs.
+
+Run the local verification suite with:
+
+```shell
+PYTHONPATH=src pytest -q
+```
+
+### Defining experiments
+
+Copy [configs/server-three-models.yaml](./configs/server-three-models.yaml) and edit its input, model checkpoints, commands, processors, and GPU IDs. Processor order in YAML is execution order. Currently registered steps are `identity`, `resize`, `clahe`, `gamma`, `nlm_denoise`, `bilateral_denoise`, `motion_deblur`, `super_resolution`, and `crop`. A processor implements one small interface, so another OpenCV operation can be added without changing video ingestion, caching, runners, or output validation.
+
+The recommended server deployment uses one host orchestrator environment and an isolated container for each real model:
+
+```shell
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements/orchestrator.txt
+docker build -f containers/Dockerfile.yolo -t football-pose-yolo .
+docker build -f containers/Dockerfile.hrnet -t football-pose-hrnet .
+docker build -f containers/Dockerfile.openpose -t football-pose-openpose .
+```
+
+`runners/container-runner.sh` forwards the orchestrator's per-shard GPU assignment and mounts the repository at the same absolute path inside each container. The exact runtime command remains YAML data, so a server may instead point it at a model-specific virtual environment, Apptainer wrapper, or scheduler command.
+
+See [docs/architecture.md](./docs/architecture.md) for data contracts, extension points, recovery behavior, and the server layout. Metric calculation is deliberately left downstream of the validated Parquet archives and is recorded in [TODOS.md](./TODOS.md) until the DFL/Werder ground-truth format and synchronization are fixed.
+
 
 ### Table of Contents
 <!--TOC-->

@@ -1,0 +1,5 @@
+av==14.2.0
+numpy==1.26.4
+opencv-contrib-python==4.10.0.84
+pydantic==2.11.10
+# OpenPose itself is built from commit 8ca5c1d in containers/Dockerfile.openpose.

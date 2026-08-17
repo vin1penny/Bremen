@@ -1,0 +1,28 @@
+name: local-contract-smoke
+input: ../footage/sample_30.mov
+output_dir: ../experiment-output/mock
+
+processors:
+  - type: resize
+    params:
+      width: 960
+      interpolation: lanczos
+  - type: clahe
+    params:
+      clip_limit: 2.0
+      tile_grid: [8, 8]
+
+cache:
+  root: ../artifacts
+  format: ffv1
+  shard_size: 256
+  pin: true
+
+models:
+  - id: mock-coco17
+    # {python} resolves to the interpreter running the orchestrator.
+    command: ["{python}", runners/mock/run.py]
+    batch_size: 32
+    min_batch_size: 1
+    devices: []
+    timeout_seconds: 3600

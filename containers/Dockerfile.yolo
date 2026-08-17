@@ -1,0 +1,15 @@
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/workspace/src
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /workspace
+COPY requirements/yolo.txt requirements/yolo.txt
+RUN python3 -m pip install --no-cache-dir -r requirements/yolo.txt
+COPY src src
+COPY runners/yolo runners/yolo
+ENTRYPOINT ["python3", "runners/yolo/run.py"]
+

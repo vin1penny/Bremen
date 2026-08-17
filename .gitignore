@@ -145,6 +145,10 @@ celerybeat.pid
 
 # Environments
 
+.venv/
+artifacts/
+experiment-output/
+
 *.env
 
 # Spyder project settings

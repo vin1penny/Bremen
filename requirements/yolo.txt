@@ -1,0 +1,7 @@
+av==14.2.0
+numpy==2.3.5
+opencv-contrib-python==4.10.0.84
+pydantic==2.11.10
+supervision==0.27.0.post1
+torch==2.5.1
+ultralytics==8.4.19
