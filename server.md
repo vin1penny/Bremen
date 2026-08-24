@@ -253,6 +253,37 @@ export PIP_CACHE_DIR=/home/vincent/.cache/pip
 export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
 ```
 
+Activating `.venv` selects the project interpreter, but it does not automatically add
+the repository's `src/` directory to Python's import path. Both `source` and the
+`PYTHONPATH` export are therefore required after every new SSH login. Confirm them
+before running tests or experiments:
+
+```bash
+which python
+echo "$PYTHONPATH"
+python -c "import football_pose; print(football_pose.__file__)"
+```
+
+The expected values begin with:
+
+```text
+/home/vincent/projects/Bremen/.venv/bin/python
+/home/vincent/projects/Bremen/src
+/home/vincent/projects/Bremen/src/football_pose/__init__.py
+```
+
+If Python reports `No module named football_pose`, return to the repository root and
+set `PYTHONPATH` again:
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+```
+
+Do not use `pip install -e .` for this repository. It currently has no `pyproject.toml`
+or `setup.py`; `football_pose` is loaded directly from `src/` through `PYTHONPATH`.
+
 ## 7. Run the safe CPU checks
 
 These commands do not require a GPU reservation:
