@@ -570,17 +570,17 @@ docker run --rm vincent/football-pose-openpose:dev --help
 ```
 
 The standard BODY_25 weight is a separate private-server input so its checksum is
-recorded with each job. OpenPose's legacy CMake download host may not resolve from
-Lyra; if necessary, download `pose_iter_584000.caffemodel` on the Mac using the
-official OpenPose model URL and transfer it with `scp`:
+recorded with each job. OpenPose's legacy CMU model host is currently unavailable.
+Download the file directly on Lyra from this commit-pinned Hugging Face mirror. The
+mirror file was verified against the MD5 embedded in OpenPose v1.7.0 and against its
+published SHA-256:
 
 ```bash
-curl --fail --location --retry 20 \
-  --output /Users/larry/Downloads/pose_iter_584000.caffemodel \
-  http://posefs1.perception.cs.cmu.edu/OpenPose/models/pose/body_25/pose_iter_584000.caffemodel
+mkdir -p /home/vincent/football-pose-private/checkpoints
 
-scp /Users/larry/Downloads/pose_iter_584000.caffemodel \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
+curl --fail --location --retry 20 \
+  --output /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel \
+  'https://huggingface.co/camenduru/openpose/resolve/f5bb0c0a16060ac8b373472a5456c76bd68eb202/models/pose/body_25/pose_iter_584000.caffemodel?download=true'
 ```
 
 Verify the file on Lyra. The MD5 value pinned by OpenPose v1.7.0 is shown below; the
@@ -591,11 +591,15 @@ md5sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemod
 sha256sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
 ```
 
-Expected MD5:
+Expected hashes:
 
 ```text
-78287b57cf85fa89c03f1393d368e5b7
+MD5     78287b57cf85fa89c03f1393d368e5b7
+SHA-256 44e3d7ebd8c8b62d4366d67127f1b562611a9e8fd0f4f3cdeeb4bb4a6ed12be6
 ```
+
+Delete and download the file again if either hash differs. Do not use an unverified
+checkpoint in an experiment.
 
 Validate the matched configurations:
 
