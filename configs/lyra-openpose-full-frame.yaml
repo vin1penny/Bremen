@@ -1,0 +1,25 @@
+name: lyra-openpose-full-frame-baseline
+input: /home/vincent/projects/Bremen/footage/sample_30.mov
+output_dir: /home/vincent/football-pose-results/openpose-full-frame
+
+# No image preprocessing: this is the OpenPose reference for the tiling comparison.
+processors: []
+
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: ffv1
+  shard_size: 256
+  pin: true
+
+models:
+  - id: openpose-body25
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-openpose:dev
+      - --net-resolution
+      - -1x368
+    batch_size: 1
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 7200

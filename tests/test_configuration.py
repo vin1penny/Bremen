@@ -79,3 +79,22 @@ def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> Non
         "overlap_ratio": 0.1,
     }
     assert full_frame.models == tiled.models
+
+
+def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() -> None:
+    full_frame = load_config(
+        REPOSITORY / "configs/lyra-openpose-full-frame.yaml", check_paths=False
+    )
+    tiled = load_config(
+        REPOSITORY / "configs/lyra-openpose-tiled.yaml", check_paths=False
+    )
+
+    assert full_frame.processors == []
+    assert [processor.type for processor in tiled.processors] == ["tile"]
+    assert tiled.processors[0].params == {
+        "rows": 2,
+        "columns": 2,
+        "overlap_ratio": 0.1,
+    }
+    assert full_frame.models == tiled.models
+    assert full_frame.models[0].command[-2:] == ["--net-resolution", "-1x368"]

@@ -15,13 +15,26 @@ def main() -> None:
     parser = contract_parser("CMU OpenPose BODY_25 artifact runner")
     parser.add_argument("--openpose-python", default="/opt/openpose/build/python")
     parser.add_argument("--model-folder", default="/opt/openpose/models")
+    parser.add_argument(
+        "--net-resolution",
+        default="-1x368",
+        help="OpenPose network resolution; recorded as part of the model command.",
+    )
     namespace = parser.parse_args()
     args = contract_args(namespace)
     sys.path.append(namespace.openpose_python)
     from openpose import pyopenpose as op
 
     wrapper = op.WrapperPython()
-    wrapper.configure({"model_folder": namespace.model_folder, "model_pose": "BODY_25"})
+    wrapper.configure(
+        {
+            "model_folder": namespace.model_folder,
+            "model_pose": "BODY_25",
+            "net_resolution": namespace.net_resolution,
+            "keypoint_scale": 0,
+            "render_pose": 0,
+        }
+    )
     wrapper.start()
     packets = iter_artifact(
         args.input_artifact, shard_index=args.shard_index, shard_count=args.shard_count

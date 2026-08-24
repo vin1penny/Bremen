@@ -1,0 +1,30 @@
+name: lyra-openpose-deterministic-tiling
+input: /home/vincent/projects/Bremen/footage/sample_30.mov
+output_dir: /home/vincent/football-pose-results/openpose-tiled
+
+# This differs from the OpenPose full-frame baseline only by deterministic tiling.
+processors:
+  - type: tile
+    params:
+      rows: 2
+      columns: 2
+      overlap_ratio: 0.10
+
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: auto
+  shard_size: 256
+  pin: true
+
+models:
+  - id: openpose-body25
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-openpose:dev
+      - --net-resolution
+      - -1x368
+    batch_size: 1
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 7200

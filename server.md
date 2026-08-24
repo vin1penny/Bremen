@@ -300,7 +300,7 @@ python -m football_pose run configs/mock.yaml
 Expected unit-test result after pulling the deterministic-tiling update:
 
 ```text
-27 passed
+28 passed
 ```
 
 The earlier server run on the preceding revision passed all 16 tests. Its cold mock
@@ -544,11 +544,56 @@ size. Compare the record count, model time, and logs. Overlap duplicates remain
 identified by tile ID; they will be fused in original-frame coordinates before final
 metrics.
 
-Do not build or run HRNet or OpenPose until this comparison is reviewed and the shared
-trained-crop artifact for the three-model experiment has been validated. The complete
-experiment structure is defined in `experiment.md`.
+The observed result was 0 YOLO pose records for 782 full frames and 451 raw records
+for 3,128 tiles. Tiling therefore helped, but the upper-bound player-instance recall
+is below 3% when at least 20 players are visible per frame. It is not sufficient as
+the final pipeline.
 
-## 14. Later: run the full serial, multi-GPU experiment
+## 14. Compare full-frame OpenPose with deterministic tiling
+
+OpenPose is bottom-up and can run on the same two inputs without external boxes. Build
+it after the YOLO comparison has been reviewed. The build compiles OpenPose from the
+pinned source commit and downloads its standard BODY_25 weights; it does not require a
+GPU reservation. By default the Dockerfile uses eight compiler jobs rather than all
+64 server CPUs:
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+
+docker build \
+  --build-arg BUILD_JOBS=8 \
+  -f containers/Dockerfile.openpose \
+  -t vincent/football-pose-openpose:dev .
+
+docker run --rm vincent/football-pose-openpose:dev --help
+```
+
+Validate the matched configurations:
+
+```bash
+python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
+python -m football_pose validate-config configs/lyra-openpose-tiled.yaml
+```
+
+Both configurations fix BODY_25 network resolution at `-1x368`. After reserving GPU
+0 and exporting `CUDA_VISIBLE_DEVICES=0`, run them serially:
+
+```bash
+python -m football_pose run configs/lyra-openpose-full-frame.yaml
+python -m football_pose run configs/lyra-openpose-tiled.yaml
+```
+
+They reuse the existing full-frame and tiled artifacts when the source video and
+preprocessing implementation are unchanged. Compare raw records and runtime, while
+remembering that overlapping-tile records have not yet been deduplicated.
+
+Do not use a full-frame HRNet run to judge whether HRNet is better at finding players.
+HRNet-W32 is top-down and requires a person box. Its first valid test comes after a
+fixed detector/tracker has produced the shared crop artifact used by all three pose
+models. The complete experiment structure is defined in `experiment.md`.
+
+## 15. Later: run the full serial, multi-GPU experiment
 
 Only continue after the staged one-GPU tests pass.
 
@@ -580,7 +625,7 @@ tmux attach -t thesis-pose
 
 The orchestrator runs YOLO Pose, HRNet-W32, and OpenPose serially. Within each model, work is sharded across all configured GPUs. CUDA out-of-memory failures automatically restart the complete model attempt with half the batch size until `min_batch_size` is reached.
 
-## 15. Find outputs and logs
+## 16. Find outputs and logs
 
 For the suggested external results root:
 
@@ -615,7 +660,7 @@ scp -r \
   /local/backup/destination/
 ```
 
-## 16. Save server-side code changes
+## 17. Save server-side code changes
 
 Before editing:
 
@@ -637,7 +682,7 @@ git push
 
 Never use `git add .` when private data or generated outputs may be present. Never commit model weights, source footage, secrets, cache artifacts, Parquet results, or runner logs.
 
-## 17. Daily start and finish checklist
+## 18. Daily start and finish checklist
 
 At the start:
 
@@ -731,6 +776,8 @@ First confirm that no process is writing that exact artifact. Do not delete lock
 - [docs/architecture.md](docs/architecture.md) - contracts, artifacts, recovery, and GPU scheduling
 - [configs/lyra-yolo-full-frame.yaml](configs/lyra-yolo-full-frame.yaml) - full-frame YOLO tiling baseline
 - [configs/lyra-yolo-tiled.yaml](configs/lyra-yolo-tiled.yaml) - matched deterministic-tiling YOLO run
+- [configs/lyra-openpose-full-frame.yaml](configs/lyra-openpose-full-frame.yaml) - full-frame OpenPose baseline
+- [configs/lyra-openpose-tiled.yaml](configs/lyra-openpose-tiled.yaml) - matched deterministic-tiling OpenPose run
 - [configs/lyra-yolo-one-gpu.yaml](configs/lyra-yolo-one-gpu.yaml) - tracked YOLO-only Lyra smoke-test template
 - [configs/server-three-models.yaml](configs/server-three-models.yaml) - tracked three-model configuration template
 - [TODOS.md](TODOS.md) - deferred evaluation work
