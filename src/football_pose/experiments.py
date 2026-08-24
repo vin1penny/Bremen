@@ -55,7 +55,7 @@ class ExperimentRunner:
         packets = pipeline.process(source.frames(), context)
         artifact_format = self.config.cache.format
         if artifact_format == "auto":
-            artifact_format = "png_shards" if pipeline.has_crop else "ffv1"
+            artifact_format = "png_shards" if pipeline.requires_png_shards else "ffv1"
         provenance = {
             "football_pose_version": __version__,
             "input": str(self.config.input),

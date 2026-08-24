@@ -15,6 +15,7 @@ from football_pose.preprocessing.opencv import (
     ResizeProcessor,
     SuperResolutionProcessor,
 )
+from football_pose.preprocessing.tiling import TileProcessor
 
 
 ProcessorFactory = Callable[[dict[str, Any]], Processor]
@@ -33,6 +34,7 @@ REGISTRY: dict[str, ProcessorFactory] = {
     "bilateral_denoise": _factory(BilateralDenoiseProcessor),
     "super_resolution": _factory(SuperResolutionProcessor),
     "motion_deblur": _factory(MotionDeblurProcessor),
+    "tile": _factory(TileProcessor),
 }
 
 

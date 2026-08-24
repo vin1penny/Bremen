@@ -33,6 +33,10 @@ class Pipeline:
     def has_crop(self) -> bool:
         return any(processor.name == "crop" for processor in self.processors)
 
+    @property
+    def requires_png_shards(self) -> bool:
+        return any(processor.name in {"crop", "tile"} for processor in self.processors)
+
     def process(
         self, packets: Iterable[FramePacket], context: ProcessorContext
     ) -> Iterator[FramePacket]:

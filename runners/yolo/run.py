@@ -13,10 +13,26 @@ from football_pose.runner_cli import batches, contract_args, contract_parser
 
 def main() -> None:
     parser = contract_parser("Ultralytics YOLO Pose artifact runner")
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=640,
+        help="Ultralytics inference image size; recorded as part of the model command.",
+    )
+    parser.add_argument(
+        "--confidence",
+        type=float,
+        default=0.25,
+        help="Minimum person detection confidence.",
+    )
     namespace = parser.parse_args()
     args = contract_args(namespace)
     if args.checkpoint is None:
         parser.error("--checkpoint is required")
+    if namespace.imgsz < 1:
+        parser.error("--imgsz must be positive")
+    if not 0.0 <= namespace.confidence <= 1.0:
+        parser.error("--confidence must be in [0.0, 1.0]")
     from ultralytics import YOLO
 
     model = YOLO(str(args.checkpoint))
@@ -31,6 +47,8 @@ def main() -> None:
                 [packet.image for packet in packet_batch],
                 verbose=False,
                 device=device,
+                imgsz=namespace.imgsz,
+                conf=namespace.confidence,
             )
             elapsed_ms = (time.perf_counter() - start) * 1000 / len(packet_batch)
             for packet, result in zip(packet_batch, results, strict=True):

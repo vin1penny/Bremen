@@ -61,3 +61,21 @@ def test_lyra_yolo_smoke_config_is_scoped_to_one_model_and_gpu() -> None:
     assert [model.id for model in loaded.models] == ["yolo-pose"]
     assert loaded.models[0].devices == [0]
     assert loaded.models[0].command[-1] == "vincent/football-pose-yolo:dev"
+
+
+def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> None:
+    full_frame = load_config(
+        REPOSITORY / "configs/lyra-yolo-full-frame.yaml", check_paths=False
+    )
+    tiled = load_config(
+        REPOSITORY / "configs/lyra-yolo-tiled.yaml", check_paths=False
+    )
+
+    assert full_frame.processors == []
+    assert [processor.type for processor in tiled.processors] == ["tile"]
+    assert tiled.processors[0].params == {
+        "rows": 2,
+        "columns": 2,
+        "overlap_ratio": 0.1,
+    }
+    assert full_frame.models == tiled.models

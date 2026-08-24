@@ -6,7 +6,9 @@ This is the durable reference for connecting to Lyra, locating the project, test
 
 | Item | Saved value |
 | --- | --- |
-| Server hostname | `lyra` |
+| SSH alias | `lyra` |
+| Server hostname | `lyra.d2ip.tu-berlin.de` |
+| Server IP snapshot | `141.23.38.146` |
 | Server user | `vincent` |
 | Server home | `/home/vincent` |
 | Server repository | `/home/vincent/projects/Bremen` |
@@ -50,6 +52,20 @@ Connect to the university VPN first if Lyra is not reachable from the current ne
 ```bash
 ssh vincent@lyra
 ```
+
+The Mac SSH alias should resolve directly to the hostname from the server account
+email:
+
+```sshconfig
+Host lyra
+    HostName lyra.d2ip.tu-berlin.de
+    User vincent
+    IdentityFile ~/.ssh/lsi_gpu_rsa
+    IdentitiesOnly yes
+```
+
+Do not retain an old `ProxyCommand` or the obsolete internal address `192.168.5.6` in
+this host block.
 
 On the first connection, verify the host fingerprint with the administrator before accepting it. Never share a password or private SSH key.
 
@@ -250,10 +266,10 @@ python -m football_pose run configs/mock.yaml
 python -m football_pose run configs/mock.yaml
 ```
 
-Expected unit-test result after pulling this runbook's YOLO smoke-test update:
+Expected unit-test result after pulling the deterministic-tiling update:
 
 ```text
-18 passed
+27 passed
 ```
 
 The earlier server run on the preceding revision passed all 16 tests. Its cold mock
@@ -445,6 +461,11 @@ The smoke test passes only when all of these are true:
 - `predictions.parquet` and `manifest.json` exist.
 - The runner stderr log has no unexplained exception.
 
+This is an infrastructure pass. A `COMPLETE` job with `records: "0"` proves the
+container and archive contract, but it is not a useful pose result. The first Lyra
+run completed this contract and produced zero records because the wide frame reached
+YOLO at its default 640-pixel inference size.
+
 Inspect the output without guessing its generated job ID:
 
 ```bash
@@ -456,11 +477,45 @@ find /home/vincent/football-pose-results/yolo-one-gpu-smoke \
 
 Release the semaphore reservation immediately after the run finishes or fails.
 
-## 13. Stop here before adding the other models
+## 13. Compare full-frame YOLO with deterministic tiling
 
-Do not build or run HRNet or OpenPose until the YOLO summary and runner logs have been
-reviewed. After YOLO passes, the next milestone is a crop-enabled YOLO comparison on
-the same short clip. Only then add the other pose models and scale to multiple GPUs.
+Pull the tiling implementation and rebuild the YOLO image. Docker should reuse the
+large dependency layers:
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+
+docker build \
+  -f containers/Dockerfile.yolo \
+  -t vincent/football-pose-yolo:dev .
+```
+
+The two tracked configurations keep the video, official checkpoint, inference size,
+confidence, batch, and GPU constant. Their only image-input difference is the `tile`
+processor:
+
+```bash
+python -m football_pose validate-config configs/lyra-yolo-full-frame.yaml
+python -m football_pose validate-config configs/lyra-yolo-tiled.yaml
+```
+
+After reserving the configured GPU and exporting the same ID, run:
+
+```bash
+python -m football_pose run configs/lyra-yolo-full-frame.yaml
+python -m football_pose run configs/lyra-yolo-tiled.yaml
+```
+
+The full-frame baseline uses the original 1920 x 1080 frames but fixes YOLO inference
+at 640. The tiled run uses a 2 x 2 grid with 10% overlap and the same 640 inference
+size. Compare the record count, model time, and logs. Overlap duplicates remain
+identified by tile ID; they will be fused in original-frame coordinates before final
+metrics.
+
+Do not build or run HRNet or OpenPose until this comparison is reviewed and the shared
+trained-crop artifact for the three-model experiment has been validated. The complete
+experiment structure is defined in `experiment.md`.
 
 ## 14. Later: run the full serial, multi-GPU experiment
 
@@ -641,7 +696,10 @@ First confirm that no process is writing that exact artifact. Do not delete lock
 ## Related project documentation
 
 - [README.md](README.md) - project setup and modular-pipeline overview
+- [experiment.md](experiment.md) - experiment stages, comparisons, and fairness rules
 - [docs/architecture.md](docs/architecture.md) - contracts, artifacts, recovery, and GPU scheduling
+- [configs/lyra-yolo-full-frame.yaml](configs/lyra-yolo-full-frame.yaml) - full-frame YOLO tiling baseline
+- [configs/lyra-yolo-tiled.yaml](configs/lyra-yolo-tiled.yaml) - matched deterministic-tiling YOLO run
 - [configs/lyra-yolo-one-gpu.yaml](configs/lyra-yolo-one-gpu.yaml) - tracked YOLO-only Lyra smoke-test template
 - [configs/server-three-models.yaml](configs/server-three-models.yaml) - tracked three-model configuration template
 - [TODOS.md](TODOS.md) - deferred evaluation work

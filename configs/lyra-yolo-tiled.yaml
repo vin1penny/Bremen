@@ -1,0 +1,33 @@
+name: lyra-yolo-deterministic-tiling
+input: /home/vincent/projects/Bremen/footage/sample_30.mov
+output_dir: /home/vincent/football-pose-results/yolo-tiled
+
+# This differs from the full-frame baseline only by deterministic tiling.
+processors:
+  - type: tile
+    params:
+      rows: 2
+      columns: 2
+      overlap_ratio: 0.10
+
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: auto
+  shard_size: 256
+  pin: true
+
+models:
+  - id: yolo-pose
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-yolo:dev
+      - --imgsz
+      - "640"
+      - --confidence
+      - "0.25"
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+    batch_size: 8
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 3600

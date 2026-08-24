@@ -8,6 +8,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from football_pose.archive import read_archive
+from football_pose.artifacts import iter_artifact
 from football_pose.configuration import ExperimentConfig
 from football_pose.experiments import ExperimentRunner
 from football_pose.runners import ExternalModelRunner, RunnerExecutionError
@@ -76,6 +77,33 @@ def test_end_to_end_mock_runner_is_resumable_and_multi_sharded(
     assert second["preprocessing_mode"] == "warm_cache"
     assert second["preprocessing_stage_timings"] == {}
     assert second["jobs"][0]["attempts"] == 1
+
+
+def test_tiled_pipeline_uses_png_shards_and_preserves_every_tile(
+    tmp_path: Path, tiny_video: Path
+) -> None:
+    config = ExperimentConfig.model_validate(
+        {
+            "name": "tile-artifact",
+            "input": tiny_video,
+            "output_dir": tmp_path / "output",
+            "processors": [
+                {
+                    "type": "tile",
+                    "params": {"rows": 2, "columns": 2, "overlap_ratio": 0.1},
+                }
+            ],
+            "cache": {"root": tmp_path / "cache", "format": "auto"},
+        }
+    )
+
+    prepared = ExperimentRunner(config).prepare()
+
+    assert prepared.artifact_manifest.format == "png_shards"
+    assert prepared.artifact_manifest.frame_count == 24
+    packets = list(iter_artifact(prepared.artifact_path))
+    assert len({packet.source_id for packet in packets}) == 24
+    assert all(packet.metadata["tile"]["rows"] == 2 for packet in packets)
 
 
 def test_oom_restarts_all_shards_with_smaller_batch(tmp_path: Path, tiny_video: Path) -> None:

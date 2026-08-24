@@ -6,7 +6,10 @@
 flowchart LR
     V["MP4 / MOV / MKV"] --> D["PyAV decode + presentation timestamps"]
     D --> P["Ordered preprocessing pipeline"]
+    P --> T["Optional deterministic tiles"]
     P --> C["Optional YOLO detection + tracked crops"]
+    T --> C
+    T --> A
     C --> A["Content-addressed lossless artifact"]
     P --> A
     A --> Y["YOLO Pose: all selected GPUs"]
@@ -23,7 +26,7 @@ The model arrows describe scheduling, not data dependence: every model reads the
 
 ## Stable contracts
 
-`FramePacket` is the internal image contract. Besides a BGR `uint8` image it carries source-frame index, presentation timestamp, source size, optional crop/track identity, and a 3×3 transform from current pixels back to source-video pixels. Geometric processors compose that transform. Consequently all model outputs can be compared in original-frame coordinates even after resizing, super-resolution, or cropping.
+`FramePacket` is the internal image contract. Besides a BGR `uint8` image it carries source-frame index, presentation timestamp, source size, optional region/crop/track identity, and a 3×3 transform from current pixels back to source-video pixels. Geometric processors compose that transform. Consequently all model outputs can be compared in original-frame coordinates even after resizing, super-resolution, deterministic tiling, or cropping.
 
 `PredictionRecord` is the external runner contract. It contains exactly 17 COCO keypoints, model/pipeline/experiment/source IDs, timestamps, person/crop/track IDs, source bounding box, inference time, and an explicit `original_frame` coordinate-space tag. OpenPose BODY_25 is mapped to COCO-17; HRNet and YOLO Pose already emit the COCO order.
 
@@ -41,7 +44,7 @@ Input, output, cache, and checkpoint fields are resolved relative to the YAML fi
 
 ## Artifacts and recovery
 
-The artifact key is the SHA-256 hash of the source bytes plus the validated preprocessing configuration. Full-frame constant-resolution pipelines use FFV1 in Matroska; crop or variable-resolution pipelines use lossless PNGs in deterministic TAR shards. A JSONL sidecar preserves frame/crop transforms and identity. A completed `artifact.json` is the cache commit marker.
+The artifact key is the SHA-256 hash of the source bytes plus the validated preprocessing configuration. Full-frame constant-resolution pipelines use FFV1 in Matroska; tiled, cropped, or variable-resolution pipelines use lossless PNGs in deterministic TAR shards. A JSONL sidecar preserves frame/region/crop transforms and identity. A completed `artifact.json` is the cache commit marker.
 
 Artifacts and result archives are written to temporary paths and renamed only after completion. Model jobs persist `PENDING → RUNNING → VALIDATING → COMPLETE` or `FAILED`. Interrupted states are recovered as failed and may be rerun. Completed jobs are reused only while their Parquet output exists. A CUDA OOM deletes the incomplete attempt as an eligible result and restarts every shard at half the batch size; logs remain available for diagnosis.
 

@@ -92,7 +92,11 @@ class CropProcessor:
             bottom = min(packet.height, int(np.ceil(y2 + pad_y)))
             if right - left < self.min_size or bottom - top < self.min_size:
                 continue
-            crop_id = f"{packet.frame_index:09d}-{detection_index:04d}"
+            crop_id = (
+                f"{packet.crop_id}-person-{detection_index:04d}"
+                if packet.crop_id is not None
+                else f"{packet.frame_index:09d}-{detection_index:04d}"
+            )
             current_to_previous = np.array(
                 [[1, 0, left], [0, 1, top], [0, 0, 1]], dtype=np.float64
             )
