@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+import shutil
 import sys
+import tempfile
 import time
 
 import numpy as np
@@ -9,6 +12,18 @@ from football_pose.artifacts import iter_artifact
 from football_pose.domain import PredictionRecord
 from football_pose.model_mapping import BODY25_TO_COCO17, canonical_keypoints
 from football_pose.runner_cli import contract_args, contract_parser
+
+
+def _stage_body25_checkpoint(
+    bundled_model_folder: Path, checkpoint: Path, destination: Path
+) -> Path:
+    """Combine bundled model definitions with an externally mounted BODY_25 weight."""
+    shutil.copytree(bundled_model_folder, destination)
+    weight = destination / "pose/body_25/pose_iter_584000.caffemodel"
+    weight.parent.mkdir(parents=True, exist_ok=True)
+    weight.unlink(missing_ok=True)
+    weight.symlink_to(checkpoint)
+    return destination
 
 
 def main() -> None:
@@ -22,13 +37,21 @@ def main() -> None:
     )
     namespace = parser.parse_args()
     args = contract_args(namespace)
+    if args.checkpoint is None:
+        parser.error("--checkpoint is required")
+    runtime_models = tempfile.TemporaryDirectory(prefix="openpose-models-")
+    model_folder = _stage_body25_checkpoint(
+        Path(namespace.model_folder),
+        args.checkpoint,
+        Path(runtime_models.name) / "models",
+    )
     sys.path.append(namespace.openpose_python)
     from openpose import pyopenpose as op
 
     wrapper = op.WrapperPython()
     wrapper.configure(
         {
-            "model_folder": namespace.model_folder,
+            "model_folder": str(model_folder),
             "model_pose": "BODY_25",
             "net_resolution": namespace.net_resolution,
             "keypoint_scale": 0,

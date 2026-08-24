@@ -300,7 +300,7 @@ python -m football_pose run configs/mock.yaml
 Expected unit-test result after pulling the deterministic-tiling update:
 
 ```text
-28 passed
+29 passed
 ```
 
 The earlier server run on the preceding revision passed all 16 tests. Its cold mock
@@ -552,10 +552,10 @@ the final pipeline.
 ## 14. Compare full-frame OpenPose with deterministic tiling
 
 OpenPose is bottom-up and can run on the same two inputs without external boxes. Build
-it after the YOLO comparison has been reviewed. The build compiles OpenPose from the
-pinned source commit and downloads its standard BODY_25 weights; it does not require a
-GPU reservation. By default the Dockerfile uses eight compiler jobs rather than all
-64 server CPUs:
+it after the YOLO comparison has been reviewed. The image compiles OpenPose from the
+pinned source commit without downloading model weights during the build. It does not
+require a GPU reservation. By default the Dockerfile uses eight compiler jobs rather
+than all 64 server CPUs:
 
 ```bash
 cd /home/vincent/projects/Bremen
@@ -567,6 +567,34 @@ docker build \
   -t vincent/football-pose-openpose:dev .
 
 docker run --rm vincent/football-pose-openpose:dev --help
+```
+
+The standard BODY_25 weight is a separate private-server input so its checksum is
+recorded with each job. OpenPose's legacy CMake download host may not resolve from
+Lyra; if necessary, download `pose_iter_584000.caffemodel` on the Mac using the
+official OpenPose model URL and transfer it with `scp`:
+
+```bash
+curl --fail --location --retry 20 \
+  --output /Users/larry/Downloads/pose_iter_584000.caffemodel \
+  http://posefs1.perception.cs.cmu.edu/OpenPose/models/pose/body_25/pose_iter_584000.caffemodel
+
+scp /Users/larry/Downloads/pose_iter_584000.caffemodel \
+  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
+```
+
+Verify the file on Lyra. The MD5 value pinned by OpenPose v1.7.0 is shown below; the
+experiment manifest additionally records SHA-256:
+
+```bash
+md5sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
+sha256sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
+```
+
+Expected MD5:
+
+```text
+78287b57cf85fa89c03f1393d368e5b7
 ```
 
 Validate the matched configurations:
