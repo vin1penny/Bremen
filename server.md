@@ -608,12 +608,12 @@ python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
 python -m football_pose validate-config configs/lyra-openpose-tiled.yaml
 ```
 
-Both configurations fix BODY_25 network resolution at `-1x368` and currently pin the
-OpenPose smoke tests to physical GPU 1. After reserving GPU 1 in the shared semaphore,
+Both configurations fix BODY_25 network resolution at `-1x368` and currently use
+physical GPU 7 as their default. After reserving GPU 7 in the shared semaphore,
 run them serially:
 
 ```bash
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=7
 
 python -m football_pose run configs/lyra-openpose-full-frame.yaml
 python -m football_pose run configs/lyra-openpose-tiled.yaml
