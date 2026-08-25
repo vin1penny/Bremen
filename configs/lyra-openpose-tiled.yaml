@@ -26,5 +26,5 @@ models:
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
     min_batch_size: 1
-    devices: [0]
+    devices: [1]
     timeout_seconds: 7200
