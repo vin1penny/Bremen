@@ -97,4 +97,4 @@ def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() ->
         "overlap_ratio": 0.1,
     }
     assert full_frame.models == tiled.models
-    assert full_frame.models[0].command[-2:] == ["--net-resolution", "-1x368"]
+    assert full_frame.models[0].command[-1] == "--net-resolution=-1x368"

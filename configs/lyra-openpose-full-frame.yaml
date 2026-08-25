@@ -17,8 +17,7 @@ models:
       - bash
       - runners/container-runner.sh
       - vincent/football-pose-openpose:dev
-      - --net-resolution
-      - -1x368
+      - --net-resolution=-1x368
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
     min_batch_size: 1
