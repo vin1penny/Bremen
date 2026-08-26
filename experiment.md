@@ -127,11 +127,18 @@ for config in \
 do
   python -m football_pose run "$config"
 done
+
+python -m football_pose build-overview \
+  /home/vincent/football-pose-results \
+  --model yolo-pose \
+  --model openpose-body25
 ```
 
 Each command materializes one lossless artifact and then runs YOLO Pose followed by
 OpenPose. Release GPU 7 after the final command completes or immediately after a
 failure. No container rebuild is required for these host-side preprocessing changes.
+The final command regenerates the objective record-count table at
+`/home/vincent/football-pose-results/results-overview/records.md`.
 
 The initial video inspection showed strong local illumination differences but little
 obvious sensor noise or consistent motion-blur direction. Denoising and configured
@@ -210,8 +217,8 @@ ground-truth metrics.
 
 Current 30-second screening results are:
 
-The same results and current promotion decisions are maintained as a quick reference
-in [`results-overview/README.md`](results-overview/README.md).
+An objective baseline-relative table can be regenerated from saved summaries using the
+instructions in [`results-overview/README.md`](results-overview/README.md).
 
 | Input pipeline | YOLO records | OpenPose records | OpenPose records/frame | OpenPose change from full frame |
 | --- | ---: | ---: | ---: | ---: |
