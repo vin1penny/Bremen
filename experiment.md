@@ -149,6 +149,83 @@ Run the best candidate pipelines on the complete evaluation footage with all thr
 models where the input contract is valid. Preserve the YAML, artifact manifest,
 checkpoint hashes, runner logs, prediction Parquet files, and final metrics.
 
+## Outputs and result files
+
+Every configuration writes to its configured `output_dir`. One experiment directory
+contains the high-level report, while each model receives its own job directory:
+
+```text
+OUTPUT_DIR/
+├── experiments/EXPERIMENT_ID/
+│   └── summary.json
+└── jobs/JOB_ID/
+    ├── job.json
+    ├── archive/
+    │   ├── manifest.json
+    │   └── predictions.parquet
+    └── runner/
+        ├── predictions.jsonl
+        └── attempt-01-batch-N/
+            ├── shard-000.jsonl
+            ├── shard-000.stdout.log
+            └── shard-000.stderr.log
+```
+
+The IDs prevent results from different pipelines and model settings from colliding.
+A two-model configuration therefore produces two `JOB_ID` directories: one for YOLO
+Pose and one for OpenPose.
+
+| File | Meaning | Use |
+| --- | --- | --- |
+| `summary.json` | Exact high-level JSON also printed by the CLI | First file to inspect; configuration, timings, jobs, record counts, and success |
+| `job.json` | Latest execution state for one model | Attempts, model ID, batch size, errors, timings, and output paths |
+| `archive/predictions.parquet` | Canonical compact prediction table | Primary input for evaluation and statistical analysis |
+| `archive/manifest.json` | Archive schema and provenance | Reproducibility, checkpoint and artifact metadata, and validation |
+| `runner/predictions.jsonl` | Merged raw runner predictions | Human-readable debugging and conversion source |
+| `runner/attempt-*/shard-*.jsonl` | Predictions produced by one execution shard | Diagnose sharding and merge behavior |
+| `runner/attempt-*/*.log` | Model-container standard output and errors | Diagnose warnings, crashes, CUDA errors, and dependency problems |
+
+`summary.json` is written atomically, but rerunning the same experiment replaces that
+experiment's previous summary with the latest invocation. Preserve invocation-level
+reports in a timestamped external folder when cold-cache and warm-cache runs must both
+remain available. The Parquet archive is canonical; JSONL is intentionally retained
+because it is convenient for auditing. macOS `.DS_Store` files are Finder metadata and
+are unrelated to the experiment.
+
+The result download does not contain the usually much larger preprocessed frame
+artifact. Artifacts remain under the configured cache root on Lyra and can be
+regenerated from the source video, preprocessing configuration, and implementation.
+Important downloaded results should retain at least the configuration YAML,
+`summary.json`, `job.json`, and the complete `archive/` directory. Logs should also be
+kept for thesis auditability.
+
+### Interpreting `records`
+
+One record represents one person-pose prediction, not one video frame and not one
+correct detection. Dividing records by the 782 source frames gives raw predictions per
+frame. This is a detection-yield diagnostic, not an accuracy metric: false positives
+increase it, missed players decrease it, and overlapping tiles can produce duplicate
+records. Pose quality can only be established through visual inspection and later
+ground-truth metrics.
+
+Current 30-second screening results are:
+
+| Input pipeline | YOLO records | OpenPose records | OpenPose records/frame | OpenPose change from full frame |
+| --- | ---: | ---: | ---: | ---: |
+| Full frame, no preprocessing | 0 | 826 | 1.06 | reference |
+| CLAHE | 0 | 1,154 | 1.48 | +39.7% |
+| Gamma 0.8 | 0 | 700 | 0.90 | -15.3% |
+| Gamma 1.2 | 0 | 797 | 1.02 | -3.5% |
+| Unsharp mask | 0 | 933 | 1.19 | +13.0% |
+| 2 x 2 tiling, 10% overlap | 451 | 5,989 | 7.66 | +625.1% raw |
+
+CLAHE is currently the strongest non-tiling transformation by raw OpenPose yield, and
+unsharp masking is the only other full-frame transformation that increased it. Neither
+gamma variant is promoted. YOLO remaining at zero for every full-frame pixel-level
+transformation supports the player-scale bottleneck hypothesis. Tiling remains the
+largest gain, but its records must be deduplicated in source-frame coordinates before
+being interpreted as detections or compared with ground truth.
+
 ## Fair-comparison rules
 
 1. Use the same source frames and timestamps.
