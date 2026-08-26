@@ -98,3 +98,37 @@ def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() ->
     }
     assert full_frame.models == tiled.models
     assert full_frame.models[0].command[-1] == "--net-resolution=-1x368"
+
+
+@pytest.mark.parametrize(
+    ("filename", "processor_type", "params"),
+    [
+        (
+            "lyra-preprocess-clahe.yaml",
+            "clahe",
+            {"clip_limit": 2.0, "tile_grid": [8, 8]},
+        ),
+        ("lyra-preprocess-gamma-darken.yaml", "gamma", {"gamma": 0.8}),
+        ("lyra-preprocess-gamma-brighten.yaml", "gamma", {"gamma": 1.2}),
+        (
+            "lyra-preprocess-unsharp.yaml",
+            "unsharp_mask",
+            {"kernel_size": 5, "sigma": 1.0, "amount": 0.75},
+        ),
+    ],
+)
+def test_preprocessing_screen_configs_change_only_the_named_processor(
+    filename: str,
+    processor_type: str,
+    params: dict[str, object],
+) -> None:
+    reference = load_config(
+        REPOSITORY / "configs/lyra-preprocess-clahe.yaml", check_paths=False
+    )
+    loaded = load_config(REPOSITORY / "configs" / filename, check_paths=False)
+
+    assert [processor.type for processor in loaded.processors] == [processor_type]
+    assert loaded.processors[0].params == params
+    assert loaded.models == reference.models
+    assert [model.id for model in loaded.models] == ["yolo-pose", "openpose-body25"]
+    assert all(model.devices == [7] for model in loaded.models)

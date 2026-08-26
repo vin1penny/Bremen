@@ -103,6 +103,42 @@ Evaluate individual steps before testing combinations. Candidate steps include:
 - deterministic tiling
 - learned tracked cropping
 
+The first full-frame screening batch uses four single-factor configurations on the
+same 30-second clip. Each artifact is shared by YOLO Pose and OpenPose, which run
+serially with unchanged model settings:
+
+| Configuration | Isolated change | Purpose |
+| --- | --- | --- |
+| `lyra-preprocess-clahe.yaml` | CLAHE, clip 2.0 | Normalize local contrast across sun and shadow |
+| `lyra-preprocess-gamma-darken.yaml` | gamma 0.8 | Recover contrast in bright regions |
+| `lyra-preprocess-gamma-brighten.yaml` | gamma 1.2 | Lift players located in shadow |
+| `lyra-preprocess-unsharp.yaml` | mild unsharp mask | Strengthen small player edges before model resizing |
+
+After reserving GPU 7, run the configurations serially:
+
+```bash
+export CUDA_VISIBLE_DEVICES=7
+
+for config in \
+  configs/lyra-preprocess-clahe.yaml \
+  configs/lyra-preprocess-gamma-darken.yaml \
+  configs/lyra-preprocess-gamma-brighten.yaml \
+  configs/lyra-preprocess-unsharp.yaml
+do
+  python -m football_pose run "$config"
+done
+```
+
+Each command materializes one lossless artifact and then runs YOLO Pose followed by
+OpenPose. Release GPU 7 after the final command completes or immediately after a
+failure. No container rebuild is required for these host-side preprocessing changes.
+
+The initial video inspection showed strong local illumination differences but little
+obvious sensor noise or consistent motion-blur direction. Denoising and configured
+motion deblurring therefore remain second-tier screens rather than being mixed into
+the first batch. Super-resolution remains separate because it requires a pinned model
+checkpoint and changes both computational cost and image scale.
+
 Promote only beneficial individual steps into combination experiments. Every promoted
 combination is compared against its direct parent pipeline so the contribution of each
 added step remains visible.

@@ -14,6 +14,7 @@ from football_pose.preprocessing.opencv import (
     NlmDenoiseProcessor,
     ResizeProcessor,
     SuperResolutionProcessor,
+    UnsharpMaskProcessor,
 )
 from football_pose.preprocessing.tiling import TileProcessor
 
@@ -32,6 +33,7 @@ REGISTRY: dict[str, ProcessorFactory] = {
     "gamma": _factory(GammaProcessor),
     "nlm_denoise": _factory(NlmDenoiseProcessor),
     "bilateral_denoise": _factory(BilateralDenoiseProcessor),
+    "unsharp_mask": _factory(UnsharpMaskProcessor),
     "super_resolution": _factory(SuperResolutionProcessor),
     "motion_deblur": _factory(MotionDeblurProcessor),
     "tile": _factory(TileProcessor),

@@ -13,6 +13,7 @@ from football_pose.preprocessing.opencv import (
     MotionDeblurProcessor,
     NlmDenoiseProcessor,
     ResizeProcessor,
+    UnsharpMaskProcessor,
 )
 from football_pose.preprocessing.tiling import TileProcessor
 
@@ -42,6 +43,7 @@ def packet() -> FramePacket:
         GammaProcessor(gamma=1.2),
         NlmDenoiseProcessor(template_window=3, search_window=7),
         BilateralDenoiseProcessor(diameter=3),
+        UnsharpMaskProcessor(kernel_size=3, sigma=0.8, amount=0.75),
         MotionDeblurProcessor(length=3),
     ],
 )
@@ -59,6 +61,20 @@ def test_resize_composes_coordinate_transform(packet: FramePacket) -> None:
     )[0]
     assert output.image.shape == (64, 80, 3)
     np.testing.assert_allclose(output.points_to_source([[20, 16]]), [[10, 8]])
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"kernel_size": 2},
+        {"kernel_size": 1},
+        {"sigma": 0},
+        {"amount": 0},
+    ],
+)
+def test_unsharp_mask_rejects_invalid_configuration(params: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        UnsharpMaskProcessor(**params)
 
 
 def test_crop_after_resize_returns_original_frame_coordinates(packet: FramePacket) -> None:

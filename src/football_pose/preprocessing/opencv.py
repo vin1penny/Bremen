@@ -146,6 +146,44 @@ class BilateralDenoiseProcessor:
         return [packet.derived(cv2.bilateralFilter(packet.image, *self.params))]
 
 
+class UnsharpMaskProcessor:
+    """Sharpen edges by subtracting a Gaussian-blurred copy of the frame."""
+
+    name = "unsharp_mask"
+
+    def __init__(
+        self,
+        *,
+        kernel_size: int = 5,
+        sigma: float = 1.0,
+        amount: float = 1.0,
+    ) -> None:
+        if kernel_size < 3 or kernel_size % 2 == 0:
+            raise ValueError("unsharp mask kernel_size must be odd and at least 3")
+        if sigma <= 0 or amount <= 0:
+            raise ValueError("unsharp mask sigma and amount must be positive")
+        self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.amount = amount
+
+    def process(self, packet: FramePacket, context: ProcessorContext) -> list[FramePacket]:
+        del context
+        _validate_bgr_u8(packet)
+        blurred = cv2.GaussianBlur(
+            packet.image,
+            (self.kernel_size, self.kernel_size),
+            self.sigma,
+        )
+        sharpened = cv2.addWeighted(
+            packet.image,
+            1.0 + self.amount,
+            blurred,
+            -self.amount,
+            0,
+        )
+        return [packet.derived(sharpened)]
+
+
 class SuperResolutionProcessor:
     name = "super_resolution"
 

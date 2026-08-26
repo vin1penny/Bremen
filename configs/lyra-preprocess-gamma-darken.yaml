@@ -1,0 +1,45 @@
+name: lyra-preprocess-gamma-darken
+input: /home/vincent/projects/Bremen/footage/sample_30.mov
+output_dir: /home/vincent/football-pose-results/preprocessing/gamma-darken
+
+# Single-factor ablation: gamma below 1 darkens bright regions.
+processors:
+  - type: gamma
+    params:
+      gamma: 0.8
+
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: ffv1
+  shard_size: 256
+  pin: true
+
+models:
+  - id: yolo-pose
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-yolo:dev
+      - --imgsz
+      - "640"
+      - --confidence
+      - "0.25"
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+    batch_size: 8
+    min_batch_size: 1
+    devices: [7]
+    timeout_seconds: 3600
+
+  - id: openpose-body25
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-openpose:dev
+      - --net-resolution=-1x368
+    checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
+    batch_size: 1
+    min_batch_size: 1
+    devices: [7]
+    timeout_seconds: 7200
+
+fail_fast: false
