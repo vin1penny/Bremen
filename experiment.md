@@ -210,6 +210,9 @@ ground-truth metrics.
 
 Current 30-second screening results are:
 
+The same results and current promotion decisions are maintained as a quick reference
+in [`results-overview/README.md`](results-overview/README.md).
+
 | Input pipeline | YOLO records | OpenPose records | OpenPose records/frame | OpenPose change from full frame |
 | --- | ---: | ---: | ---: | ---: |
 | Full frame, no preprocessing | 0 | 826 | 1.06 | reference |
