@@ -628,7 +628,61 @@ HRNet-W32 is top-down and requires a person box. Its first valid test comes afte
 fixed detector/tracker has produced the shared crop artifact used by all three pose
 models. The complete experiment structure is defined in `experiment.md`.
 
-## 15. Later: run the full serial, multi-GPU experiment
+## 15. Screen other full-frame preprocessing methods
+
+Pull the preprocessing-screen configurations and verify the CPU contracts before
+reserving a GPU:
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+
+python -m pytest -q
+
+for config in configs/lyra-preprocess-*.yaml
+do
+  python -m football_pose validate-config "$config"
+done
+```
+
+The expected test result for this revision is `38 passed`. The four configurations
+each apply exactly one full-frame preprocessing change: CLAHE, gamma 0.8, gamma 1.2,
+or mild unsharp masking. Every configuration materializes one lossless artifact and
+then runs YOLO Pose followed by OpenPose with unchanged model settings. No container
+rebuild is required because these processors run in the host orchestrator.
+
+After confirming and reserving physical GPU 7 in the shared semaphore, start the
+screen inside `tmux`:
+
+```bash
+tmux new -s preprocessing-screen
+
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=7
+
+for config in \
+  configs/lyra-preprocess-clahe.yaml \
+  configs/lyra-preprocess-gamma-darken.yaml \
+  configs/lyra-preprocess-gamma-brighten.yaml \
+  configs/lyra-preprocess-unsharp.yaml
+do
+  python -m football_pose run "$config"
+done
+```
+
+Detach with `Ctrl-b`, then `d`; reconnect with `tmux attach -t preprocessing-screen`.
+Do not add tiling to these first screening runs: each result must remain attributable
+to one isolated preprocessing step. Release GPU 7 after the loop completes or fails.
+
+Compare each model's record count and model runtime against its full-frame baseline.
+Do not promote a step into a tiled or combined pipeline until its predictions have
+also passed visual inspection and overlapping-tile results have been deduplicated.
+
+## 16. Later: run the full serial, multi-GPU experiment
 
 Only continue after the staged one-GPU tests pass.
 
@@ -660,7 +714,7 @@ tmux attach -t thesis-pose
 
 The orchestrator runs YOLO Pose, HRNet-W32, and OpenPose serially. Within each model, work is sharded across all configured GPUs. CUDA out-of-memory failures automatically restart the complete model attempt with half the batch size until `min_batch_size` is reached.
 
-## 16. Find outputs and logs
+## 17. Find outputs and logs
 
 For the suggested external results root:
 
@@ -695,7 +749,7 @@ scp -r \
   /local/backup/destination/
 ```
 
-## 17. Save server-side code changes
+## 18. Save server-side code changes
 
 Before editing:
 
@@ -717,7 +771,7 @@ git push
 
 Never use `git add .` when private data or generated outputs may be present. Never commit model weights, source footage, secrets, cache artifacts, Parquet results, or runner logs.
 
-## 18. Daily start and finish checklist
+## 19. Daily start and finish checklist
 
 At the start:
 
