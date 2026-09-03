@@ -4,21 +4,24 @@ This is the durable reference for connecting to Lyra, locating the project, test
 
 ## Saved connection and repository details
 
-| Item | Saved value |
-| --- | --- |
-| SSH alias | `lyra` |
-| Server hostname | `lyra.d2ip.tu-berlin.de` |
-| Server IP snapshot | `141.23.38.146` |
-| Server user | `vincent` |
-| Server home | `/home/vincent` |
-| Server repository | `/home/vincent/projects/Bremen` |
-| GitHub repository | `https://github.com/vin1penny/Bremen.git` |
-| Working branch | `codex/modular-football-pipeline` |
-| Local Mac repository | `/Users/larry/Bremen/FootballTrackingDataGeneration-main` |
-| Regenerable server cache (current fallback) | `/home/vincent/football-pose-cache/artifacts` |
-| Preferred shared cache (not yet provisioned) | `/lyra/cache/vincent/football-pose/artifacts` |
-| Suggested private-data root | `/home/vincent/football-pose-private` |
-| Suggested results root | `/home/vincent/football-pose-results` |
+| Item                                         | Saved value                                               |
+| -------------------------------------------- | --------------------------------------------------------- |
+| SSH alias                                    | `lyra`                                                    |
+| Server hostname                              | `lyra.d2ip.tu-berlin.de`                                  |
+| Server IP snapshot                           | `141.23.38.146`                                           |
+| Server user                                  | `vincent`                                                 |
+| Server home                                  | `/home/vincent`                                           |
+| Server repository                            | `/home/vincent/projects/Bremen`                           |
+| GitHub repository                            | `https://github.com/vin1penny/Bremen.git`                 |
+| Working branch                               | `codex/modular-football-pipeline`                         |
+| Local Mac repository                         | `/Users/larry/Bremen/FootballTrackingDataGeneration-main` |
+| Regenerable server cache (current fallback)  | `/home/vincent/football-pose-cache/artifacts`             |
+| Preferred shared cache (not yet provisioned) | `/lyra/cache/vincent/football-pose/artifacts`             |
+| Suggested private-data root                  | `/home/vincent/football-pose-private`                     |
+| Suggested results root                       | `/home/vincent/football-pose-results`                     |
+| Approved mounted video root                  | `/mnt/storage2/vincent/football-pose/videos`              |
+| Mounted input videos                         | `/mnt/storage2/vincent/football-pose/videos/input`        |
+| Mounted rendered/output videos               | `/mnt/storage2/vincent/football-pose/videos/output`       |
 
 Confirm with the Lyra administrator whether `/home/vincent` is backed up and whether it has a quota. Do not treat `/lyra/cache` as backed-up storage.
 
@@ -26,22 +29,22 @@ Confirm with the Lyra administrator whether `/home/vincent` is backed up and whe
 
 Recorded on 2026-08-17. Recheck before diagnosing a future environment problem.
 
-| Component | Observed value |
-| --- | --- |
-| Operating system | Debian GNU/Linux 12 (Bookworm) |
-| Python | 3.12.4 |
-| Git | 2.39.5 |
-| Docker | 28.1.1 |
-| Docker NVIDIA runtime | Available |
-| GPUs | 8 x NVIDIA A100-SXM4 40 GB |
-| NVIDIA driver | 575.51.03 |
-| Driver-reported CUDA compatibility | 12.9 |
-| `nvitop` | Not installed; use `nvidia-smi` |
-| `/lyra` snapshot | 2.1 TB total, 226 GB available, 90% used |
-| Root filesystem snapshot | 94 GB total, 1.4 GB available, 99% used |
-| `/home` snapshot | 4.7 TB total, 224 GB available, 96% used |
-| Built YOLO image | `vincent/football-pose-yolo:dev` (9.84 GB) |
-| Verified YOLO packages | PyTorch 2.5.1+cu124, Ultralytics 8.4.19, OpenCV 4.10.0, PyAV 14.2.0 |
+| Component                          | Observed value                                                      |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| Operating system                   | Debian GNU/Linux 12 (Bookworm)                                      |
+| Python                             | 3.12.4                                                              |
+| Git                                | 2.39.5                                                              |
+| Docker                             | 28.1.1                                                              |
+| Docker NVIDIA runtime              | Available                                                           |
+| GPUs                               | 8 x NVIDIA A100-SXM4 40 GB                                          |
+| NVIDIA driver                      | 575.51.03                                                           |
+| Driver-reported CUDA compatibility | 12.9                                                                |
+| `nvitop`                           | Not installed; use `nvidia-smi`                                     |
+| `/lyra` snapshot                   | 2.1 TB total, 226 GB available, 90% used                            |
+| Root filesystem snapshot           | 94 GB total, 1.4 GB available, 99% used                             |
+| `/home` snapshot                   | 4.7 TB total, 224 GB available, 96% used                            |
+| Built YOLO image                   | `vincent/football-pose-yolo:dev` (9.84 GB)                          |
+| Verified YOLO packages             | PyTorch 2.5.1+cu124, Ultralytics 8.4.19, OpenCV 4.10.0, PyAV 14.2.0 |
 
 The CUDA number printed by `nvidia-smi` describes the driver's maximum compatible CUDA version. Each model container supplies its own pinned CUDA runtime.
 
@@ -52,6 +55,8 @@ Connect to the university VPN first if Lyra is not reachable from the current ne
 ```bash
 ssh vincent@lyra
 ```
+
+Password: retrieve from the approved password manager; never store it in Git.
 
 The Mac SSH alias should resolve directly to the hostname from the server account
 email:
@@ -136,10 +141,13 @@ Do not discard, overwrite, or stash unfamiliar server changes. Commit intentiona
 
 ## 4. Create the server storage layout
 
-Keep private and durable data outside the Git clone. This reduces the risk of committing footage, weights, secrets, or large results.
+Keep private and durable data outside the Git clone. This reduces the risk of
+committing footage, weights, secrets, or large results. Large input and rendered
+output videos use the approved NFS storage mounted from
+`141.23.38.152:/raid0_ssd2`; source code, checkpoints, caches, and prediction files
+remain in their existing home locations.
 
 ```bash
-mkdir -p /home/vincent/football-pose-private/footage
 mkdir -p /home/vincent/football-pose-private/checkpoints
 mkdir -p /home/vincent/football-pose-private/configs
 mkdir -p /home/vincent/football-pose-results
@@ -147,26 +155,43 @@ mkdir -p /home/vincent/football-pose-cache/artifacts
 mkdir -p /home/vincent/.cache/football-pose/pip-tmp
 mkdir -p /home/vincent/.cache/football-pose/ultralytics
 chmod 700 /home/vincent/football-pose-private
+
+FOOTBALL_VIDEO_ROOT=/mnt/storage2/vincent/football-pose/videos
+umask 077
+mkdir -p "$FOOTBALL_VIDEO_ROOT/input" "$FOOTBALL_VIDEO_ROOT/output"
+chmod 700 \
+  /mnt/storage2/vincent \
+  /mnt/storage2/vincent/football-pose \
+  "$FOOTBALL_VIDEO_ROOT" \
+  "$FOOTBALL_VIDEO_ROOT/input" \
+  "$FOOTBALL_VIDEO_ROOT/output"
 ```
+
+The mounted video directories were verified on 2026-09-03 as owned by
+`vincent:vincent`, mode `700`, and writable. At verification time `/mnt/storage2`
+had about 20 TB available. Recheck before large transfers. The remote source path
+contains `raid0`; unless the administrator explicitly confirms backups, treat it as
+working storage rather than the only copy of irreplaceable footage.
 
 Creating `/lyra/cache/vincent/...` currently fails with `Permission denied`. Use the
 home-based cache above until an administrator provisions a writable directory on
 `/lyra/cache`; then update experiment YAML explicitly. The home fallback avoids the
 nearly full root filesystem, but it is not proof that the data is backed up.
 
-| Data | Location | Git-backed? | Regenerable? |
-| --- | --- | --- | --- |
-| Source code and experiment YAML | `/home/vincent/projects/Bremen` | Yes | Yes |
-| Private footage | `/home/vincent/football-pose-private/footage` | No | Usually no |
-| Unique checkpoints | `/home/vincent/football-pose-private/checkpoints` | No | Usually no |
-| Parquet, manifests, logs | `/home/vincent/football-pose-results` | No | Expensive to reproduce |
-| Preprocessed artifacts | `/home/vincent/football-pose-cache/artifacts` | No | Yes |
+| Data                            | Location                                          | Git-backed? | Regenerable?           |
+| ------------------------------- | ------------------------------------------------- | ----------- | ---------------------- |
+| Source code and experiment YAML | `/home/vincent/projects/Bremen`                   | Yes         | Yes                    |
+| Large input videos              | `/mnt/storage2/vincent/football-pose/videos/input` | No          | Usually no             |
+| Rendered/output videos          | `/mnt/storage2/vincent/football-pose/videos/output` | No         | Usually reproducible   |
+| Unique checkpoints              | `/home/vincent/football-pose-private/checkpoints` | No          | Usually no             |
+| Parquet, manifests, logs        | `/home/vincent/football-pose-results`             | No          | Expensive to reproduce |
+| Preprocessed artifacts          | `/home/vincent/football-pose-cache/artifacts`     | No          | Yes                    |
 
 Check space before large jobs:
 
 ```bash
-df -h / /tmp /home/vincent /lyra
-df -i / /tmp /home/vincent /lyra
+df -h / /tmp /home/vincent /lyra /mnt/storage2
+df -i / /tmp /home/vincent /lyra /mnt/storage2
 docker system df
 ```
 
@@ -181,7 +206,7 @@ Run `scp` from the Mac, not from inside the Lyra SSH session. Examples:
 
 ```bash
 scp /local/path/test-video.mp4 \
-  vincent@lyra:/home/vincent/football-pose-private/footage/
+  vincent@lyra:/mnt/storage2/vincent/football-pose/videos/input/
 
 scp /local/path/player.pt \
   vincent@lyra:/home/vincent/football-pose-private/checkpoints/
@@ -196,10 +221,32 @@ scp /local/path/hrnet-w32.pth \
 Verify on Lyra:
 
 ```bash
-ls -lh /home/vincent/football-pose-private/footage
+ls -lh /mnt/storage2/vincent/football-pose/videos/input
 ls -lh /home/vincent/football-pose-private/checkpoints
 sha256sum /home/vincent/football-pose-private/checkpoints/*
 ```
+
+To copy the existing 30-second sample from the repository into mounted storage,
+preserve the original until both hashes match:
+
+```bash
+cp -v \
+  /home/vincent/projects/Bremen/footage/sample_30.mov \
+  /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
+
+sha256sum \
+  /home/vincent/projects/Bremen/footage/sample_30.mov \
+  /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
+```
+
+All tracked Lyra experiment YAML files read `sample_30.mov` from the mounted input
+directory. Do not remove the original copy until configuration validation and one
+experiment run succeed against the mounted file.
+
+The pipeline currently writes JSONL, Parquet, manifests, summaries, and logs under
+`/home/vincent/football-pose-results`. It does not currently render output videos.
+When annotated or comparison-video export is added, write those large files to
+`/mnt/storage2/vincent/football-pose/videos/output`.
 
 Do not put secrets, private footage, or unique weights into Git. The modular inference pipeline does not need a Roboflow API key unless a separate training or Roboflow notebook is used.
 
