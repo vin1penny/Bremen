@@ -1,5 +1,5 @@
 name: lyra-native-preprocess-gamma-brighten
-input: /home/vincent/projects/Bremen/footage/sample_30.mov
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/gamma-brighten
 
 # Single-factor ablation: gamma above 1 lifts shadow detail.

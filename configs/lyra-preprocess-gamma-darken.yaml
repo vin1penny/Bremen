@@ -1,5 +1,5 @@
 name: lyra-native-preprocess-gamma-darken
-input: /home/vincent/projects/Bremen/footage/sample_30.mov
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/gamma-darken
 
 # Single-factor ablation: gamma below 1 darkens bright regions.

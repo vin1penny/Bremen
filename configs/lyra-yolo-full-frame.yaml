@@ -1,5 +1,5 @@
 name: lyra-native-yolo-full-frame-baseline
-input: /home/vincent/projects/Bremen/footage/sample_30.mov
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/yolo-full-frame
 
 # No image preprocessing: this is the reference input for the tiling comparison.

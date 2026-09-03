@@ -1,5 +1,5 @@
 name: lyra-native-openpose-deterministic-tiling
-input: /home/vincent/projects/Bremen/footage/sample_30.mov
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/openpose-tiled
 
 # This differs from the OpenPose full-frame baseline only by deterministic tiling.

@@ -1,5 +1,5 @@
 name: lyra-yolo-one-gpu-smoke
-input: /home/vincent/projects/Bremen/footage/sample_30.mov
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/yolo-one-gpu-smoke
 
 # Keep the first GPU test intentionally small and independent of the crop detector.
