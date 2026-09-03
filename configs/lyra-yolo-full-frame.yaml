@@ -1,6 +1,6 @@
-name: lyra-yolo-full-frame-baseline
+name: lyra-native-yolo-full-frame-baseline
 input: /home/vincent/projects/Bremen/footage/sample_30.mov
-output_dir: /home/vincent/football-pose-results/yolo-full-frame
+output_dir: /home/vincent/football-pose-results/native-resolution/yolo-full-frame
 
 # No image preprocessing: this is the reference input for the tiling comparison.
 processors: []
@@ -18,11 +18,11 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - "640"
+      - native
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
     batch_size: 8
     min_batch_size: 1
-    devices: [0]
+    devices: [7]
     timeout_seconds: 3600

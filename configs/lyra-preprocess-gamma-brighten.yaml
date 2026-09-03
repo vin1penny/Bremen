@@ -1,6 +1,6 @@
-name: lyra-preprocess-gamma-brighten
+name: lyra-native-preprocess-gamma-brighten
 input: /home/vincent/projects/Bremen/footage/sample_30.mov
-output_dir: /home/vincent/football-pose-results/preprocessing/gamma-brighten
+output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/gamma-brighten
 
 # Single-factor ablation: gamma above 1 lifts shadow detail.
 processors:
@@ -21,7 +21,7 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - "640"
+      - native
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
@@ -35,7 +35,7 @@ models:
       - bash
       - runners/container-runner.sh
       - vincent/football-pose-openpose:dev
-      - --net-resolution=-1x368
+      - --net-resolution=1920x1088
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
     min_batch_size: 1

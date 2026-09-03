@@ -2,22 +2,52 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Literal
 
 import numpy as np
 
 from football_pose.artifacts import iter_artifact
-from football_pose.domain import PredictionRecord
+from football_pose.domain import FramePacket, PredictionRecord
 from football_pose.model_mapping import bbox_to_source, canonical_keypoints
 from football_pose.runner_cli import batches, contract_args, contract_parser
+
+
+ImageSize = int | Literal["native"]
+
+
+def _parse_image_size(value: str) -> ImageSize:
+    normalized = value.strip().lower()
+    if normalized == "native":
+        return "native"
+    try:
+        size = int(normalized)
+    except ValueError as error:
+        raise ValueError("--imgsz must be a positive integer or 'native'") from error
+    if size < 1:
+        raise ValueError("--imgsz must be a positive integer or 'native'")
+    return size
+
+
+def _batch_image_size(
+    packet_batch: list[FramePacket], requested: ImageSize
+) -> int | tuple[int, int]:
+    if requested != "native":
+        return requested
+    return (
+        max(packet.height for packet in packet_batch),
+        max(packet.width for packet in packet_batch),
+    )
 
 
 def main() -> None:
     parser = contract_parser("Ultralytics YOLO Pose artifact runner")
     parser.add_argument(
         "--imgsz",
-        type=int,
-        default=640,
-        help="Ultralytics inference image size; recorded as part of the model command.",
+        default="640",
+        help=(
+            "Ultralytics inference image size. Use a positive integer for a fixed "
+            "maximum dimension or 'native' to avoid downscaling incoming frames."
+        ),
     )
     parser.add_argument(
         "--confidence",
@@ -29,8 +59,10 @@ def main() -> None:
     args = contract_args(namespace)
     if args.checkpoint is None:
         parser.error("--checkpoint is required")
-    if namespace.imgsz < 1:
-        parser.error("--imgsz must be positive")
+    try:
+        image_size = _parse_image_size(namespace.imgsz)
+    except ValueError as error:
+        parser.error(str(error))
     if not 0.0 <= namespace.confidence <= 1.0:
         parser.error("--confidence must be in [0.0, 1.0]")
     from ultralytics import YOLO
@@ -47,7 +79,7 @@ def main() -> None:
                 [packet.image for packet in packet_batch],
                 verbose=False,
                 device=device,
-                imgsz=namespace.imgsz,
+                imgsz=_batch_image_size(packet_batch, image_size),
                 conf=namespace.confidence,
             )
             elapsed_ms = (time.perf_counter() - start) * 1000 / len(packet_batch)

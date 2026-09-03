@@ -79,6 +79,9 @@ def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> Non
         "overlap_ratio": 0.1,
     }
     assert full_frame.models == tiled.models
+    assert full_frame.models[0].devices == [7]
+    image_size_index = full_frame.models[0].command.index("--imgsz")
+    assert full_frame.models[0].command[image_size_index + 1] == "native"
 
 
 def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() -> None:
@@ -97,7 +100,7 @@ def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() ->
         "overlap_ratio": 0.1,
     }
     assert full_frame.models == tiled.models
-    assert full_frame.models[0].command[-1] == "--net-resolution=-1x368"
+    assert full_frame.models[0].command[-1] == "--net-resolution=1920x1088"
 
 
 @pytest.mark.parametrize(
@@ -132,3 +135,6 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
     assert loaded.models == reference.models
     assert [model.id for model in loaded.models] == ["yolo-pose", "openpose-body25"]
     assert all(model.devices == [7] for model in loaded.models)
+    image_size_index = loaded.models[0].command.index("--imgsz")
+    assert loaded.models[0].command[image_size_index + 1] == "native"
+    assert loaded.models[1].command[-1] == "--net-resolution=1920x1088"

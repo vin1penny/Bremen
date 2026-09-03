@@ -23,6 +23,13 @@ processor or parameter creates a different pipeline identifier and cached artifa
 Models run serially, while each model may distribute the artifact across its reserved
 GPUs.
 
+The main experiment does not downscale model inputs. YOLO Pose uses `--imgsz native`,
+which selects the largest incoming height and width in each batch. The 1920x1080
+source is therefore passed without spatial downscaling. OpenPose uses the nearest
+stride-compatible full-frame network resolution, `1920x1088`. Earlier runs at YOLO
+640 and OpenPose `-1x368` are retained as pilot results and are not mixed with the
+main full-resolution comparisons.
+
 ## Models
 
 - **YOLO Pose:** official pretrained checkpoint; supports multi-person input.
@@ -105,7 +112,7 @@ Evaluate individual steps before testing combinations. Candidate steps include:
 
 The first full-frame screening batch uses four single-factor configurations on the
 same 30-second clip. Each artifact is shared by YOLO Pose and OpenPose, which run
-serially with unchanged model settings:
+serially with unchanged full-resolution model settings:
 
 | Configuration | Isolated change | Purpose |
 | --- | --- | --- |
@@ -129,7 +136,7 @@ do
 done
 
 python -m football_pose build-overview \
-  /home/vincent/football-pose-results \
+  /home/vincent/football-pose-results/native-resolution \
   --model yolo-pose \
   --model openpose-body25
 ```
@@ -138,7 +145,7 @@ Each command materializes one lossless artifact and then runs YOLO Pose followed
 OpenPose. Release GPU 7 after the final command completes or immediately after a
 failure. No container rebuild is required for these host-side preprocessing changes.
 The final command regenerates the objective record-count table at
-`/home/vincent/football-pose-results/results-overview/records.md`.
+`/home/vincent/football-pose-results/native-resolution/results-overview/records.md`.
 
 The initial video inspection showed strong local illumination differences but little
 obvious sensor noise or consistent motion-blur direction. Denoising and configured

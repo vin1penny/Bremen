@@ -1,6 +1,6 @@
-name: lyra-openpose-deterministic-tiling
+name: lyra-native-openpose-deterministic-tiling
 input: /home/vincent/projects/Bremen/footage/sample_30.mov
-output_dir: /home/vincent/football-pose-results/openpose-tiled
+output_dir: /home/vincent/football-pose-results/native-resolution/openpose-tiled
 
 # This differs from the OpenPose full-frame baseline only by deterministic tiling.
 processors:
@@ -22,7 +22,7 @@ models:
       - bash
       - runners/container-runner.sh
       - vincent/football-pose-openpose:dev
-      - --net-resolution=-1x368
+      - --net-resolution=1920x1088
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
     min_batch_size: 1
