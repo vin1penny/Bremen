@@ -814,11 +814,12 @@ pose models and preprocessing variants. In the YAML, `pitch_filter.device: "0"`
 means logical GPU 0 inside the process; with `CUDA_VISIBLE_DEVICES=7`, that is physical
 GPU 7.
 
-This revision corrects tiled runner bounding boxes and therefore intentionally creates
-new pose jobs rather than treating the older tiled archives as deduplicable. Rerunning
-the unchanged new revision reuses its prediction archive, pitch-filter archive, and
-video. If only its MP4 is missing, the pipeline recreates the MP4 without rerunning
-model inference.
+This revision enables pitch filtering in every tracked Lyra configuration and corrects
+tiled runner bounding boxes. Its first run therefore creates new pose jobs for all
+configurations; older tiled archives do not contain valid person boxes for automatic
+deduplication. Rerunning the unchanged new revision reuses its prediction archive,
+pitch-filter archive, and video. If only its MP4 is missing, the pipeline recreates
+the MP4 without rerunning model inference.
 
 Compare each model's record count and model runtime against its full-frame baseline.
 Do not promote a step into a tiled or combined pipeline until its predictions have
