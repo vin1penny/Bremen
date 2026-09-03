@@ -31,12 +31,20 @@ def _write_summary(
     )
 
 
-def _job(model_id: str, records: int, updated: float = 1.0) -> dict[str, object]:
+def _job(
+    model_id: str,
+    records: int,
+    updated: float = 1.0,
+    on_pitch: int | None = None,
+) -> dict[str, object]:
+    outputs = {"records": str(records)}
+    if on_pitch is not None:
+        outputs["on_pitch_records"] = str(on_pitch)
     return {
         "model_id": model_id,
         "status": "COMPLETE",
         "updated_at_unix": updated,
-        "outputs": {"records": str(records)},
+        "outputs": outputs,
     }
 
 
@@ -95,6 +103,27 @@ def test_write_overview_creates_default_folder(tmp_path: Path) -> None:
 
     assert output == tmp_path / "results-overview" / "records.md"
     assert output.is_file()
+
+
+def test_overview_reports_raw_and_on_pitch_counts(tmp_path: Path) -> None:
+    _write_summary(
+        tmp_path,
+        "baseline",
+        processors=[],
+        jobs=[_job("openpose-body25", 120, on_pitch=100)],
+    )
+    _write_summary(
+        tmp_path,
+        "tiled",
+        processors=[{"type": "tile", "params": {"rows": 2, "columns": 2}}],
+        jobs=[_job("openpose-body25", 300, on_pitch=110)],
+    )
+
+    markdown = render_overview(collect_results(tmp_path), source_root=tmp_path)
+
+    assert "OpenPose on-pitch | OpenPose raw | OpenPose vs baseline" in markdown
+    assert "| Baseline: full frame, unchanged | 100 | 120 | reference |" in markdown
+    assert "| 2 x 2 tiling (? overlap) | 110 | 300 | +10.0% |" in markdown
 
 
 def test_collect_results_rejects_missing_summaries(tmp_path: Path) -> None:

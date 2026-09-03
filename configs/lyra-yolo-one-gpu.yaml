@@ -6,6 +6,25 @@ video_output:
   enabled: true
   root: /mnt/storage2/vincent/football-pose/videos/output
 
+pitch_filter:
+  enabled: true
+  checkpoint: /home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
+  cache_root: /home/vincent/football-pose-cache/pitch
+  device: "0"
+  image_size: 640
+  batch_size: 16
+  detection_confidence: 0.25
+  landmark_confidence: 0.5
+  minimum_landmarks: 4
+  ransac_threshold_cm: 150.0
+  minimum_inlier_ratio: 0.6
+  maximum_median_reprojection_cm: 200.0
+  max_fallback_frames: 5
+  pitch_margin_cm: 50.0
+  pitch_bbox_margin_px: 10.0
+  ankle_confidence: 0.2
+  deduplication_iou: 0.5
+
 # Keep the first GPU test intentionally small and independent of the crop detector.
 # These are the same preprocessing stages already exercised by configs/mock.yaml.
 processors:

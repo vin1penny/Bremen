@@ -98,7 +98,7 @@ def main() -> None:
                     crop_id=packet.crop_id,
                     track_id=packet.track_id,
                     person_id=packet.track_id or f"openpose-{person_index}",
-                    source_bbox=packet.source_bbox or bbox,
+                    source_bbox=bbox,
                     keypoints=canonical_keypoints(
                         packet, xy, scores, indices=BODY25_TO_COCO17
                     ),

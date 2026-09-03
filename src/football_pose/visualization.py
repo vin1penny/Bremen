@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 import uuid
@@ -14,6 +15,7 @@ from typing import Any
 import av
 import cv2
 import numpy as np
+import pyarrow.parquet as pq
 
 from football_pose.archive import read_archive
 from football_pose.artifacts import iter_artifact
@@ -147,6 +149,17 @@ def _draw_regions(image: np.ndarray, packets: list[FramePacket], thickness: int)
         cv2.rectangle(image, (x1, y1), (x2, y2), (160, 160, 160), thickness)
 
 
+def _draw_pitch_region(
+    image: np.ndarray,
+    pitch_bbox: tuple[float, float, float, float] | None,
+    thickness: int,
+) -> None:
+    if pitch_bbox is None:
+        return
+    x1, y1, x2, y2 = (int(round(value)) for value in pitch_bbox)
+    cv2.rectangle(image, (x1, y1), (x2, y2), (255, 180, 0), thickness)
+
+
 def _draw_predictions(
     image: np.ndarray,
     predictions: list[dict[str, Any]],
@@ -154,12 +167,27 @@ def _draw_predictions(
     model_id: str,
     frame_index: int,
     settings: VideoOutputConfig,
+    classifications: dict[tuple[int, str, str], str],
 ) -> None:
     thickness = max(1, round(image.shape[1] / 960))
     radius = max(2, thickness + 1)
     threshold = settings.keypoint_confidence
+    counts = {"inside": 0, "outside": 0, "duplicate": 0, "unavailable": 0}
     for prediction in predictions:
-        color = _person_color(str(prediction["person_id"]))
+        key = (
+            frame_index,
+            str(prediction["source_id"]),
+            str(prediction["person_id"]),
+        )
+        classification = classifications.get(key)
+        if classification is not None:
+            counts[classification] = counts.get(classification, 0) + 1
+        color = {
+            "inside": (60, 220, 60),
+            "outside": (40, 40, 230),
+            "duplicate": (150, 150, 150),
+            "unavailable": (0, 210, 255),
+        }.get(classification, _person_color(str(prediction["person_id"])))
         keypoints = prediction["keypoints"]
         for start, end in COCO_SKELETON:
             first, second = keypoints[start], keypoints[end]
@@ -177,7 +205,14 @@ def _draw_predictions(
                 x1, y1, x2, y2 = bbox
                 cv2.rectangle(image, (x1, y1), (x2, y2), color, thickness)
 
-    label = f"{model_id} | frame {frame_index} | poses {len(predictions)}"
+    if classifications:
+        label = (
+            f"{model_id} | frame {frame_index} | raw {len(predictions)} | "
+            f"pitch {counts['inside']} | outside {counts['outside']} | "
+            f"duplicates {counts['duplicate']} | unknown {counts['unavailable']}"
+        )
+    else:
+        label = f"{model_id} | frame {frame_index} | poses {len(predictions)}"
     font_scale = max(0.5, image.shape[1] / 1920)
     text_thickness = max(1, thickness)
     (text_width, text_height), baseline = cv2.getTextSize(
@@ -210,6 +245,8 @@ def render_annotated_video(
     output_path: str | Path,
     model_id: str,
     settings: VideoOutputConfig,
+    decision_parquet: str | Path | None = None,
+    pitch_geometry_json: str | Path | None = None,
 ) -> VideoRenderResult:
     """Render processed frames plus raw model predictions to an MP4 file."""
 
@@ -220,6 +257,27 @@ def render_annotated_video(
     predictions_by_frame: dict[int, list[dict[str, Any]]] = {}
     for prediction in read_archive(prediction_parquet):
         predictions_by_frame.setdefault(int(prediction["frame_index"]), []).append(prediction)
+    classifications: dict[tuple[int, str, str], str] = {}
+    if decision_parquet is not None:
+        for decision in pq.read_table(decision_parquet).to_pylist():
+            classifications[
+                (
+                    int(decision["frame_index"]),
+                    str(decision["source_id"]),
+                    str(decision["person_id"]),
+                )
+            ] = str(decision["classification"])
+    pitch_bboxes: dict[int, tuple[float, float, float, float]] = {}
+    if pitch_geometry_json is not None:
+        geometry_payload = json.loads(
+            Path(pitch_geometry_json).read_text(encoding="utf-8")
+        )
+        for geometry_frame in geometry_payload.get("frames", []):
+            bbox = geometry_frame.get("pitch_bbox")
+            if bbox is not None:
+                pitch_bboxes[int(geometry_frame["frame_index"])] = tuple(
+                    float(value) for value in bbox
+                )  # type: ignore[assignment]
 
     artifact_groups = iter(
         groupby(iter_artifact(artifact_path), key=lambda packet: packet.frame_index)
@@ -249,12 +307,18 @@ def render_annotated_video(
                 image = _reconstruct_processed_frame(source_packet, processed_packets)
                 if settings.draw_regions:
                     _draw_regions(image, processed_packets, max(1, round(info.width / 960)))
+                _draw_pitch_region(
+                    image,
+                    pitch_bboxes.get(source_packet.frame_index),
+                    max(1, round(info.width / 960)),
+                )
                 _draw_predictions(
                     image,
                     predictions_by_frame.get(source_packet.frame_index, []),
                     model_id=model_id,
                     frame_index=source_packet.frame_index,
                     settings=settings,
+                    classifications=classifications,
                 )
                 frame = av.VideoFrame.from_ndarray(image, format="bgr24")
                 frame.pts = frame_count
@@ -274,4 +338,3 @@ def render_annotated_video(
         codec=settings.codec,
         wall_seconds=time.perf_counter() - start,
     )
-

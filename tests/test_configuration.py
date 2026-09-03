@@ -40,6 +40,10 @@ def test_paths_are_resolved_relative_to_yaml(tmp_path: Path, tiny_video: Path) -
                 "video_output:",
                 "  enabled: true",
                 "  root: videos",
+                "pitch_filter:",
+                "  enabled: true",
+                "  checkpoint: weights.bin",
+                "  cache_root: pitch-cache",
                 "processors:",
                 "  - type: super_resolution",
                 "    params:",
@@ -53,6 +57,8 @@ def test_paths_are_resolved_relative_to_yaml(tmp_path: Path, tiny_video: Path) -
     assert loaded.output_dir == (tmp_path / "output").resolve()
     assert loaded.cache.root == (tmp_path / "cache").resolve()
     assert loaded.video_output.root == (tmp_path / "videos").resolve()
+    assert loaded.pitch_filter.checkpoint == checkpoint.resolve()
+    assert loaded.pitch_filter.cache_root == (tmp_path / "pitch-cache").resolve()
     assert loaded.processors[0].params["checkpoint"] == str(checkpoint.resolve())
 
 
@@ -145,4 +151,8 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
     assert loaded.video_output.enabled
     assert loaded.video_output.root == Path(
         "/mnt/storage2/vincent/football-pose/videos/output"
+    )
+    assert loaded.pitch_filter.enabled
+    assert loaded.pitch_filter.checkpoint == Path(
+        "/home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt"
     )

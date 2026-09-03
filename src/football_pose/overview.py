@@ -19,6 +19,7 @@ MODEL_ORDER = {model_id: index for index, model_id in enumerate(MODEL_LABELS)}
 @dataclass(frozen=True, slots=True)
 class ModelResult:
     records: int | None
+    on_pitch_records: int | None
     status: str
     updated_at_unix: float
 
@@ -37,13 +38,20 @@ def _pipeline_key(input_path: str, processors: list[dict[str, Any]]) -> tuple[st
 def _model_result(job: dict[str, Any]) -> ModelResult:
     outputs = job.get("outputs")
     records: int | None = None
+    on_pitch_records: int | None = None
     if isinstance(outputs, dict) and outputs.get("records") is not None:
         try:
             records = int(outputs["records"])
         except (TypeError, ValueError):
             records = None
+    if isinstance(outputs, dict) and outputs.get("on_pitch_records") is not None:
+        try:
+            on_pitch_records = int(outputs["on_pitch_records"])
+        except (TypeError, ValueError):
+            on_pitch_records = None
     return ModelResult(
         records=records,
+        on_pitch_records=on_pitch_records,
         status=str(job.get("status", "UNKNOWN")),
         updated_at_unix=float(job.get("updated_at_unix", 0.0)),
     )
@@ -143,11 +151,19 @@ def _result_cell(result: ModelResult | None) -> str:
 
 
 def _delta_cell(result: ModelResult | None, baseline: ModelResult | None) -> str:
-    if result is None or result.records is None:
+    if result is None:
         return "—"
-    if baseline is None or baseline.records is None or baseline.records == 0:
+    value = result.on_pitch_records if result.on_pitch_records is not None else result.records
+    baseline_value = (
+        baseline.on_pitch_records
+        if baseline is not None and baseline.on_pitch_records is not None
+        else baseline.records if baseline is not None else None
+    )
+    if value is None:
+        return "—"
+    if baseline_value is None or baseline_value == 0:
         return "n/a"
-    change = (result.records - baseline.records) / baseline.records * 100
+    change = (value - baseline_value) / baseline_value * 100
     return f"{change:+.1f}%"
 
 
@@ -165,11 +181,22 @@ def render_overview(
         },
         key=lambda model_id: (MODEL_ORDER.get(model_id, len(MODEL_ORDER)), model_id),
     )
+    has_pitch_counts = any(
+        result.on_pitch_records is not None
+        for pipelines in grouped.values()
+        for pipeline in pipelines
+        for result in pipeline.models.values()
+    )
     lines = [
         "# Automated experiment result overview",
         "",
         f"Generated from `summary.json` files below `{source_root}`.",
-        "Values are raw person-pose record counts; no manual decisions are included.",
+        (
+            "Values include raw and automatically filtered on-pitch pose counts; "
+            "no manual decisions are included."
+            if has_pitch_counts
+            else "Values are raw person-pose record counts; no manual decisions are included."
+        ),
         "",
     ]
     for input_path in sorted(grouped):
@@ -186,8 +213,14 @@ def render_overview(
         alignments = ["---"]
         for model_id in model_ids:
             label = MODEL_LABELS.get(model_id, model_id)
-            headers.extend([f"{label} records", f"{label} vs baseline"])
-            alignments.extend(["---:", "---:"])
+            if has_pitch_counts:
+                headers.extend(
+                    [f"{label} on-pitch", f"{label} raw", f"{label} vs baseline"]
+                )
+                alignments.extend(["---:", "---:", "---:"])
+            else:
+                headers.extend([f"{label} records", f"{label} vs baseline"])
+                alignments.extend(["---:", "---:"])
         lines.append("| " + " | ".join(headers) + " |")
         lines.append("| " + " | ".join(alignments) + " |")
         for pipeline in pipelines:
@@ -195,16 +228,31 @@ def render_overview(
             for model_id in model_ids:
                 result = pipeline.models.get(model_id)
                 baseline_result = baseline.models.get(model_id) if baseline is not None else None
-                delta = "reference" if not pipeline.processors and result is not None else _delta_cell(
-                    result, baseline_result
+                delta = (
+                    "reference"
+                    if not pipeline.processors and result is not None
+                    else _delta_cell(result, baseline_result)
                 )
-                cells.extend([_result_cell(result), delta])
+                if has_pitch_counts:
+                    on_pitch = (
+                        f"{result.on_pitch_records:,}"
+                        if result is not None and result.on_pitch_records is not None
+                        else "—"
+                    )
+                    cells.extend([on_pitch, _result_cell(result), delta])
+                else:
+                    cells.extend([_result_cell(result), delta])
             lines.append("| " + " | ".join(cells) + " |")
         lines.append("")
     lines.extend(
         [
             "Record counts are detection-yield diagnostics, not accuracy metrics.",
-            "Overlapping-tile results can contain duplicate predictions.",
+            (
+                "On-pitch counts exclude cross-tile IoU duplicates and predictions whose "
+                "estimated ground point is outside the detected pitch."
+                if has_pitch_counts
+                else "Overlapping-tile results can contain duplicate predictions."
+            ),
             "",
         ]
     )

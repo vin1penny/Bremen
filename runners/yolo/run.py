@@ -112,7 +112,7 @@ def main() -> None:
                         crop_id=packet.crop_id,
                         track_id=packet.track_id,
                         person_id=packet.track_id or f"yolo-{person_index}",
-                        source_bbox=packet.source_bbox or bbox_to_source(packet, bbox),
+                        source_bbox=bbox_to_source(packet, bbox),
                         keypoints=canonical_keypoints(packet, xy, scores),
                         inference_time_ms=elapsed_ms,
                     )

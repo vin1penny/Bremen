@@ -55,6 +55,36 @@ class VideoOutputConfig(BaseModel):
     draw_regions: bool = True
 
 
+class PitchFilterConfig(BaseModel):
+    """Shared pitch-localization and pose-filtering settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    checkpoint: Path | None = None
+    cache_root: Path = Path("pitch-cache")
+    device: str = "0"
+    image_size: int = Field(default=640, ge=32)
+    batch_size: int = Field(default=16, ge=1)
+    detection_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
+    landmark_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    minimum_landmarks: int = Field(default=4, ge=4, le=32)
+    ransac_threshold_cm: float = Field(default=150.0, gt=0.0)
+    minimum_inlier_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
+    maximum_median_reprojection_cm: float = Field(default=200.0, gt=0.0)
+    max_fallback_frames: int = Field(default=5, ge=0)
+    pitch_margin_cm: float = Field(default=50.0, ge=0.0)
+    pitch_bbox_margin_px: float = Field(default=10.0, ge=0.0)
+    ankle_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
+    deduplication_iou: float = Field(default=0.5, gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def checkpoint_required_when_enabled(self) -> "PitchFilterConfig":
+        if self.enabled and self.checkpoint is None:
+            raise ValueError("pitch_filter.checkpoint is required when enabled")
+        return self
+
+
 class ExperimentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,6 +95,7 @@ class ExperimentConfig(BaseModel):
     models: list[ModelSpec] = Field(default_factory=list)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     video_output: VideoOutputConfig = Field(default_factory=VideoOutputConfig)
+    pitch_filter: PitchFilterConfig = Field(default_factory=PitchFilterConfig)
     fail_fast: bool = False
 
     @model_validator(mode="after")
@@ -122,6 +153,8 @@ def load_config(path: str | Path, *, check_paths: bool = True) -> ExperimentConf
     config.output_dir = _resolve_path(base, config.output_dir)  # type: ignore[assignment]
     config.cache.root = _resolve_path(base, config.cache.root)  # type: ignore[assignment]
     config.video_output.root = _resolve_path(base, config.video_output.root)  # type: ignore[assignment]
+    config.pitch_filter.checkpoint = _resolve_path(base, config.pitch_filter.checkpoint)
+    config.pitch_filter.cache_root = _resolve_path(base, config.pitch_filter.cache_root)  # type: ignore[assignment]
     for processor in config.processors:
         processor.params = _resolve_checkpoint_parameters(processor.params, base)
     for model in config.models:
@@ -134,6 +167,15 @@ def load_config(path: str | Path, *, check_paths: bool = True) -> ExperimentConf
                 raise FileNotFoundError(
                     f"checkpoint for model {model.id!r} does not exist: {model.checkpoint}"
                 )
+        if (
+            config.pitch_filter.enabled
+            and config.pitch_filter.checkpoint is not None
+            and not config.pitch_filter.checkpoint.is_file()
+        ):
+            raise FileNotFoundError(
+                "pitch-filter checkpoint does not exist: "
+                f"{config.pitch_filter.checkpoint}"
+            )
         for processor in config.processors:
             for checkpoint in _parameter_checkpoints(processor.params):
                 if not checkpoint.is_file():

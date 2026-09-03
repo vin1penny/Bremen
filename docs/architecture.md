@@ -5,6 +5,7 @@
 ```mermaid
 flowchart LR
     V["MP4 / MOV / MKV"] --> D["PyAV decode + presentation timestamps"]
+    V --> F["Cached pitch localization"]
     D --> P["Ordered preprocessing pipeline"]
     P --> T["Optional deterministic tiles"]
     P --> C["Optional YOLO detection + tracked crops"]
@@ -19,10 +20,21 @@ flowchart LR
     H --> R
     O --> R
     R --> Q["Zstd Parquet + provenance"]
-    Q --> E["Future evaluation layer"]
+    F --> S["Pitch-region geometry"]
+    Q --> X["Cross-region duplicate removal"]
+    X --> S
+    S --> K["On-pitch Parquet + decision audit"]
+    K --> E["Future evaluation layer"]
 ```
 
 The model arrows describe scheduling, not data dependence: every model reads the same immutable artifact. Models run serially to give each one all selected GPUs and to avoid cross-model memory contention. Within a model, artifact sequence index modulo GPU count assigns frames or crops to independent processes. Their records are schema-validated, checked for duplicate identities, sorted deterministically, and atomically merged.
+
+Pitch localization is independent of preprocessing and pose inference. One
+source/checkpoint/settings combination creates a reusable geometry manifest. Each pose
+job preserves its raw archive, removes only cross-region IoU duplicates, classifies a
+person's ankle or box-bottom ground point, and writes a separate on-pitch archive plus
+one auditable decision per raw prediction. Missing or rejected geometry never mutates
+the raw archive.
 
 ## Stable contracts
 

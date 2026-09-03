@@ -15,6 +15,8 @@ video
   -> lossless, content-addressed artifact
   -> YOLO Pose / HRNet-W32 / OpenPose
   -> common COCO-17 records in original-frame coordinates
+  -> cross-tile duplicate removal and pitch-region classification
+  -> raw records + on-pitch records + auditable decisions
   -> evaluation metrics
 ```
 
@@ -40,6 +42,34 @@ as pilot results and are not mixed with the main full-resolution comparisons.
 The pose checkpoints are standard published weights, not football-specific
 fine-tuning. Exact checkpoint hashes, package versions, commands, and parameters are
 stored with every run.
+
+The separate pitch-localization model is a trained football-pitch model. It is not a
+pose model and does not change any pose estimate. It runs once per source video and
+settings combination, and its checkpoint hash and geometry cache ID are recorded in
+the experiment summary. This keeps crowd filtering identical across YOLO Pose,
+OpenPose, and later HRNet comparisons.
+
+## Pitch-aware filtering
+
+Raw pose output is always preserved. After inference, the pipeline uses the detected
+pitch region to classify the estimated ground point of each person. The ground point
+is the midpoint of confident ankle keypoints, one ankle when only one is reliable, or
+the bottom-center of that person's bounding box as a fallback.
+
+The pitch model supplies a pitch bounding region for each frame. When enough landmark
+correspondences also produce a geometrically consistent homography, the projected
+touchline coordinate provides the finer boundary test. Homographies that fail the
+configured inlier-ratio or reprojection-error checks are rejected; the pitch bounding
+region is then used conservatively. Short gaps may reuse a nearby valid homography.
+The system does not filter against an extrapolated goal line because a broadcast view
+often does not show both goal lines reliably.
+
+Before pitch classification, predictions from different overlapping tiles are
+deduplicated by person-box IoU in original-frame coordinates. Predictions produced
+inside the same source region are never merged by this step. Each raw prediction is
+retained in the decision table as `inside`, `outside`, `duplicate`, or `unavailable`.
+Only `inside` records enter the separate on-pitch archive. This makes the automatic
+filter reversible and measurable instead of silently deleting detections.
 
 ## Experiment stages
 
@@ -176,7 +206,11 @@ OUTPUT_DIR/
     ├── job.json
     ├── archive/
     │   ├── manifest.json
-    │   └── predictions.parquet
+    │   ├── predictions.parquet
+    │   └── pitch-filter/FILTER_SETTINGS_ID/
+    │       ├── manifest.json
+    │       ├── pitch-decisions.parquet
+    │       └── predictions-on-pitch.parquet
     └── runner/
         ├── predictions.jsonl
         └── attempt-01-batch-N/
@@ -199,6 +233,9 @@ Pose and one for OpenPose.
 | `job.json` | Latest execution state for one model | Attempts, model ID, batch size, errors, timings, and output paths |
 | `archive/predictions.parquet` | Canonical compact prediction table | Primary input for evaluation and statistical analysis |
 | `archive/manifest.json` | Archive schema and provenance | Reproducibility, checkpoint and artifact metadata, and validation |
+| `pitch-filter/*/predictions-on-pitch.parquet` | Deduplicated poses classified inside the pitch | Input for on-pitch player metrics |
+| `pitch-filter/*/pitch-decisions.parquet` | One decision for every raw pose | Audit inside/outside/duplicate/unavailable classifications, anchors, and methods |
+| `pitch-filter/*/manifest.json` | Filter settings, geometry path, and counts | Reproduce and interpret the filtered archive |
 | `runner/predictions.jsonl` | Merged raw runner predictions | Human-readable debugging and conversion source |
 | `runner/attempt-*/shard-*.jsonl` | Predictions produced by one execution shard | Diagnose sharding and merge behavior |
 | `runner/attempt-*/*.log` | Model-container standard output and errors | Diagnose warnings, crashes, CUDA errors, and dependency problems |
@@ -207,9 +244,11 @@ Pose and one for OpenPose.
 Every tracked Lyra configuration enables `video_output`. The renderer reconstructs
 the cached processed packets at the original video resolution, averages overlapping
 tiles, and then overlays predictions in original-frame coordinates. Tile or crop
-boundaries are drawn in gray. The label in the upper-left reports the model, source
-frame, and raw pose count. Videos contain no audio and do not replace the Parquet
-predictions or later quantitative metrics.
+boundaries are drawn in gray. With pitch filtering enabled, on-pitch poses are green,
+outside-pitch poses red, cross-tile duplicates gray, and unavailable classifications
+yellow. The cyan rectangle shows the pitch model's detected region. The upper-left
+label reports raw, on-pitch, outside, duplicate, and unknown counts. Videos contain no
+audio and do not replace the Parquet predictions or later quantitative metrics.
 
 The configuration name, experiment ID, job ID, and video-settings ID in the path keep
 videos from different processing pipelines, checkpoints, and rendering settings from
@@ -235,12 +274,12 @@ are stored separately on the mounted NFS volume because they are comparatively l
 
 ### Interpreting `records`
 
-One record represents one person-pose prediction, not one video frame and not one
-correct detection. Dividing records by the 782 source frames gives raw predictions per
-frame. This is a detection-yield diagnostic, not an accuracy metric: false positives
-increase it, missed players decrease it, and overlapping tiles can produce duplicate
-records. Pose quality can only be established through visual inspection and later
-ground-truth metrics.
+One raw record represents one person-pose prediction, not one video frame and not one
+correct detection. `on_pitch_records` is the automatic subset after cross-tile
+deduplication and pitch filtering. Dividing either count by the 782 source frames gives
+predictions per frame. Both remain detection-yield diagnostics, not accuracy metrics:
+false positives can still increase them and missed players decrease them. Pose quality
+can only be established through visual inspection and later ground-truth metrics.
 
 Current 30-second screening results are:
 
@@ -273,6 +312,7 @@ being interpreted as detections or compared with ground truth.
 6. Report missing detections, including zero-record runs; do not discard them.
 7. Record preprocessing, model, and end-to-end runtime separately.
 8. Reserve GPUs according to the Lyra semaphore and record the physical device IDs.
+9. Keep the pitch checkpoint and filter thresholds fixed within every comparison.
 
 ## Code map
 
@@ -281,6 +321,8 @@ being interpreted as detections or compared with ground truth.
 - `src/football_pose/preprocessing/tiling.py`: deterministic tile generation.
 - `src/football_pose/preprocessing/cropping.py`: learned detection, tracking, and crops.
 - `src/football_pose/artifacts.py`: immutable lossless inputs shared by the models.
+- `src/football_pose/pitch_filter.py`: cached pitch geometry, cross-tile deduplication,
+  ground-point classification, and filtered archives.
 - `runners/`: isolated YOLO Pose, HRNet-W32, and OpenPose adapters.
 - `experiment-output/` or the configured server results directory: manifests, logs,
   JSONL, and Parquet results.
