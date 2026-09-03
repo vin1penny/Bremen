@@ -2,6 +2,10 @@ name: lyra-native-yolo-deterministic-tiling
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/yolo-tiled
 
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
 # This differs from the full-frame baseline only by deterministic tiling.
 processors:
   - type: tile
@@ -23,7 +27,7 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - native
+      - "1920"
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt

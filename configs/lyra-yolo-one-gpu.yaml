@@ -2,6 +2,10 @@ name: lyra-yolo-one-gpu-smoke
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/yolo-one-gpu-smoke
 
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
 # Keep the first GPU test intentionally small and independent of the crop detector.
 # These are the same preprocessing stages already exercised by configs/mock.yaml.
 processors:

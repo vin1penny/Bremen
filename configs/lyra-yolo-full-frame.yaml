@@ -2,6 +2,10 @@ name: lyra-native-yolo-full-frame-baseline
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/yolo-full-frame
 
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
 # No image preprocessing: this is the reference input for the tiling comparison.
 processors: []
 
@@ -18,7 +22,7 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - native
+      - "1920"
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt

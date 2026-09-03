@@ -243,10 +243,11 @@ All tracked Lyra experiment YAML files read `sample_30.mov` from the mounted inp
 directory. Do not remove the original copy until configuration validation and one
 experiment run succeed against the mounted file.
 
-The pipeline currently writes JSONL, Parquet, manifests, summaries, and logs under
-`/home/vincent/football-pose-results`. It does not currently render output videos.
-When annotated or comparison-video export is added, write those large files to
-`/mnt/storage2/vincent/football-pose/videos/output`.
+The pipeline writes JSONL, Parquet, manifests, summaries, and logs under
+`/home/vincent/football-pose-results`. Every tracked Lyra experiment also renders one
+annotated MP4 per model under
+`/mnt/storage2/vincent/football-pose/videos/output`. The exact MP4 path is recorded as
+`jobs[].outputs.video` in `summary.json` and `job.json`.
 
 Do not put secrets, private footage, or unique weights into Git. The modular inference pipeline does not need a Roboflow API key unless a separate training or Roboflow notebook is used.
 
@@ -694,7 +695,7 @@ do
 done
 ```
 
-The expected test result for this revision is `38 passed`. The four configurations
+The expected test result for this revision is `49 passed`. The four configurations
 each apply exactly one full-frame preprocessing change: CLAHE, gamma 0.8, gamma 1.2,
 or mild unsharp masking. Every configuration materializes one lossless artifact and
 then runs YOLO Pose followed by OpenPose with unchanged model settings. No container
@@ -724,6 +725,67 @@ done
 Detach with `Ctrl-b`, then `d`; reconnect with `tmux attach -t preprocessing-screen`.
 Do not add tiling to these first screening runs: each result must remain attributable
 to one isolated preprocessing step. Release GPU 7 after the loop completes or fails.
+
+### Run all current native-resolution comparisons and render videos
+
+First pull the visualization code and validate it. The renderer runs in the host
+orchestrator, so the YOLO and OpenPose Docker images do not need to be rebuilt.
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+
+python -m pytest -q
+
+for config in \
+  configs/lyra-yolo-full-frame.yaml \
+  configs/lyra-openpose-full-frame.yaml \
+  configs/lyra-yolo-tiled.yaml \
+  configs/lyra-openpose-tiled.yaml \
+  configs/lyra-preprocess-clahe.yaml \
+  configs/lyra-preprocess-gamma-darken.yaml \
+  configs/lyra-preprocess-gamma-brighten.yaml \
+  configs/lyra-preprocess-unsharp.yaml
+do
+  python -m football_pose validate-config "$config"
+done
+```
+
+After reserving GPU 7 and confirming it is still available, start a persistent run:
+
+```bash
+tmux new -s native-video-experiment
+
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=7
+
+RUN_LOG=/home/vincent/football-pose-results/native-resolution/full-run.log
+
+for config in \
+  configs/lyra-yolo-full-frame.yaml \
+  configs/lyra-openpose-full-frame.yaml \
+  configs/lyra-yolo-tiled.yaml \
+  configs/lyra-openpose-tiled.yaml \
+  configs/lyra-preprocess-clahe.yaml \
+  configs/lyra-preprocess-gamma-darken.yaml \
+  configs/lyra-preprocess-gamma-brighten.yaml \
+  configs/lyra-preprocess-unsharp.yaml
+do
+  python -m football_pose run "$config" 2>&1 | tee -a "$RUN_LOG"
+done
+
+python -m football_pose build-overview \
+  /home/vincent/football-pose-results/native-resolution
+```
+
+Detach with `Ctrl-b`, then `d`. Reattach with
+`tmux attach -t native-video-experiment`. Rerunning an unchanged completed job reuses
+its prediction archive and any existing video; if only its MP4 is missing, the
+pipeline recreates the MP4 without rerunning model inference.
 
 Compare each model's record count and model runtime against its full-frame baseline.
 Do not promote a step into a tiled or combined pipeline until its predictions have
@@ -770,6 +832,7 @@ For the suggested external results root:
 /home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/manifest.json
 /home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/runner/
 /home/vincent/football-pose-results/EXPERIMENT/experiments/EXPERIMENT_ID/summary.json
+/mnt/storage2/vincent/football-pose/videos/output/CONFIGURATION/EXPERIMENT_ID/*.mp4
 ```
 
 List recent outputs:
@@ -778,6 +841,14 @@ List recent outputs:
 find /home/vincent/football-pose-results -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
   | sort -r \
   | head -50
+```
+
+List the generated review videos:
+
+```bash
+find /mnt/storage2/vincent/football-pose/videos/output \
+  -type f -name '*.mp4' -printf '%TY-%Tm-%Td %TH:%TM %10s %p\n' \
+  | sort -r
 ```
 
 Inspect a cached artifact using the path printed by the preparation command:
@@ -793,6 +864,10 @@ Copy important results back to the Mac from the Mac Terminal:
 ```bash
 scp -r \
   vincent@lyra:/home/vincent/football-pose-results/EXPERIMENT \
+  /local/backup/destination/
+
+scp -r \
+  vincent@lyra:/mnt/storage2/vincent/football-pose/videos/output/CONFIGURATION \
   /local/backup/destination/
 ```
 

@@ -2,6 +2,10 @@ name: lyra-native-preprocess-gamma-darken
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/gamma-darken
 
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
 # Single-factor ablation: gamma below 1 darkens bright regions.
 processors:
   - type: gamma
@@ -21,7 +25,7 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - native
+      - "1920"
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt

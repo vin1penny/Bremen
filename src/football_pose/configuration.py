@@ -42,6 +42,19 @@ class CacheConfig(BaseModel):
     pin: bool = True
 
 
+class VideoOutputConfig(BaseModel):
+    """Settings for human-reviewable, annotated experiment videos."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    root: Path = Path("rendered-videos")
+    codec: str = Field(default="libx264", min_length=1)
+    keypoint_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
+    draw_bboxes: bool = True
+    draw_regions: bool = True
+
+
 class ExperimentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -51,6 +64,7 @@ class ExperimentConfig(BaseModel):
     processors: list[ProcessorSpec] = Field(default_factory=list)
     models: list[ModelSpec] = Field(default_factory=list)
     cache: CacheConfig = Field(default_factory=CacheConfig)
+    video_output: VideoOutputConfig = Field(default_factory=VideoOutputConfig)
     fail_fast: bool = False
 
     @model_validator(mode="after")
@@ -107,6 +121,7 @@ def load_config(path: str | Path, *, check_paths: bool = True) -> ExperimentConf
     config.input = _resolve_path(base, config.input)  # type: ignore[assignment]
     config.output_dir = _resolve_path(base, config.output_dir)  # type: ignore[assignment]
     config.cache.root = _resolve_path(base, config.cache.root)  # type: ignore[assignment]
+    config.video_output.root = _resolve_path(base, config.video_output.root)  # type: ignore[assignment]
     for processor in config.processors:
         processor.params = _resolve_checkpoint_parameters(processor.params, base)
     for model in config.models:

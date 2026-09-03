@@ -37,6 +37,9 @@ def test_paths_are_resolved_relative_to_yaml(tmp_path: Path, tiny_video: Path) -
                 "output_dir: output",
                 "cache:",
                 "  root: cache",
+                "video_output:",
+                "  enabled: true",
+                "  root: videos",
                 "processors:",
                 "  - type: super_resolution",
                 "    params:",
@@ -49,6 +52,7 @@ def test_paths_are_resolved_relative_to_yaml(tmp_path: Path, tiny_video: Path) -
     assert loaded.input == tiny_video.resolve()
     assert loaded.output_dir == (tmp_path / "output").resolve()
     assert loaded.cache.root == (tmp_path / "cache").resolve()
+    assert loaded.video_output.root == (tmp_path / "videos").resolve()
     assert loaded.processors[0].params["checkpoint"] == str(checkpoint.resolve())
 
 
@@ -81,7 +85,7 @@ def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> Non
     assert full_frame.models == tiled.models
     assert full_frame.models[0].devices == [7]
     image_size_index = full_frame.models[0].command.index("--imgsz")
-    assert full_frame.models[0].command[image_size_index + 1] == "native"
+    assert full_frame.models[0].command[image_size_index + 1] == "1920"
 
 
 def test_full_frame_and_tiled_openpose_configs_hold_model_settings_constant() -> None:
@@ -136,5 +140,9 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
     assert [model.id for model in loaded.models] == ["yolo-pose", "openpose-body25"]
     assert all(model.devices == [7] for model in loaded.models)
     image_size_index = loaded.models[0].command.index("--imgsz")
-    assert loaded.models[0].command[image_size_index + 1] == "native"
+    assert loaded.models[0].command[image_size_index + 1] == "1920"
     assert loaded.models[1].command[-1] == "--net-resolution=1920x1088"
+    assert loaded.video_output.enabled
+    assert loaded.video_output.root == Path(
+        "/mnt/storage2/vincent/football-pose/videos/output"
+    )

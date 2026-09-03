@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 import traceback
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from football_pose.preprocessing.base import ProcessorContext
 from football_pose.provenance import collect_provenance
 from football_pose.runners import ExternalModelRunner
 from football_pose.video import VideoSource
+from football_pose.visualization import render_annotated_video
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +109,62 @@ class ExperimentRunner:
         )[:24]
 
     @staticmethod
+    def _safe_path_component(value: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
+        return cleaned or "experiment"
+
+    def _video_path(
+        self, prepared: PreparedExperiment, model: ModelSpec, job_id: str
+    ) -> Path:
+        settings_id = stable_hash(self.config.video_output.model_dump(mode="json"))[:8]
+        experiment_name = self._safe_path_component(self.config.name)
+        model_name = self._safe_path_component(model.id)
+        return (
+            self.config.video_output.root
+            / experiment_name
+            / prepared.experiment_id
+            / f"{model_name}-{job_id}-{settings_id}.mp4"
+        )
+
+    def _ensure_video(
+        self,
+        record: JobRecord,
+        prepared: PreparedExperiment,
+        model: ModelSpec,
+    ) -> JobRecord:
+        if not self.config.video_output.enabled:
+            return record
+        parquet_path = Path(record.outputs["parquet"])
+        video_path = self._video_path(prepared, model, record.job_id)
+        outputs = dict(record.outputs)
+        timings = dict(record.timings)
+        if not video_path.is_file():
+            result = render_annotated_video(
+                source_path=self.config.input,
+                artifact_path=prepared.artifact_path,
+                prediction_parquet=parquet_path,
+                output_path=video_path,
+                model_id=model.id,
+                settings=self.config.video_output,
+            )
+            timings["video_render_seconds"] = result.wall_seconds
+            outputs.update(
+                {
+                    "video": str(result.path),
+                    "video_codec": result.codec,
+                    "video_frames": str(result.frames),
+                }
+            )
+        else:
+            outputs["video"] = str(video_path)
+            outputs.setdefault("video_codec", self.config.video_output.codec)
+        updated = record.model_copy(
+            update={"outputs": outputs, "timings": timings, "updated_at_unix": time.time()}
+        )
+        self.job_store.save(updated)
+        return updated
+
+    @staticmethod
     def _fingerprint_checkpoints(value: Any) -> Any:
         if isinstance(value, dict):
             fingerprint: dict[str, Any] = {}
@@ -130,7 +188,12 @@ class ExperimentRunner:
             paths = [package / "domain.py", package / "video.py"]
             paths.extend(sorted((package / "preprocessing").glob("*.py")))
         else:
-            paths = sorted(package.glob("*.py"))
+            # Rendering changes must not invalidate expensive model predictions.
+            paths = [
+                path
+                for path in sorted(package.glob("*.py"))
+                if path.name != "visualization.py"
+            ]
         return stable_hash(
             {
                 "football_pose_version": __version__,
@@ -145,7 +208,24 @@ class ExperimentRunner:
         if record is not None and record.status == JobStatus.COMPLETE:
             parquet = Path(record.outputs.get("parquet", ""))
             if parquet.is_file():
-                return record
+                try:
+                    return self._ensure_video(record, prepared, model)
+                except Exception as error:
+                    failed = record.model_copy(
+                        update={
+                            "status": JobStatus.FAILED,
+                            "error": {
+                                "type": type(error).__name__,
+                                "message": str(error),
+                                "traceback": traceback.format_exc(),
+                            },
+                            "updated_at_unix": time.time(),
+                        }
+                    )
+                    self.job_store.save(failed)
+                    if self.config.fail_fast:
+                        raise
+                    return failed
             record = JobRecord(
                 job_id=record.job_id,
                 experiment_id=record.experiment_id,
@@ -225,16 +305,24 @@ class ExperimentRunner:
                 },
             )
             self.job_store.save(record)
+            record = self._ensure_video(record, prepared, model)
             return record
         except Exception as error:
-            failed = record.transition(
-                JobStatus.FAILED,
-                error={
-                    "type": type(error).__name__,
-                    "message": str(error),
-                    "traceback": traceback.format_exc(),
-                },
-            )
+            error_payload = {
+                "type": type(error).__name__,
+                "message": str(error),
+                "traceback": traceback.format_exc(),
+            }
+            if record.status == JobStatus.COMPLETE:
+                failed = record.model_copy(
+                    update={
+                        "status": JobStatus.FAILED,
+                        "error": error_payload,
+                        "updated_at_unix": time.time(),
+                    }
+                )
+            else:
+                failed = record.transition(JobStatus.FAILED, error=error_payload)
             self.job_store.save(failed)
             if self.config.fail_fast:
                 raise

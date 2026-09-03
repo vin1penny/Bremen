@@ -2,6 +2,10 @@ name: lyra-native-preprocess-unsharp
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/unsharp
 
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
 # Single-factor ablation: mild edge sharpening without changing frame size.
 processors:
   - type: unsharp_mask
@@ -23,7 +27,7 @@ models:
       - runners/container-runner.sh
       - vincent/football-pose-yolo:dev
       - --imgsz
-      - native
+      - "1920"
       - --confidence
       - "0.25"
     checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt

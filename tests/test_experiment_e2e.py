@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import av
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -46,6 +47,7 @@ def test_end_to_end_mock_runner_is_resumable_and_multi_sharded(
                 {"type": "gamma", "params": {"gamma": 1.1}},
             ],
             "cache": {"root": tmp_path / "cache", "format": "ffv1"},
+            "video_output": {"enabled": True, "root": tmp_path / "videos"},
             "models": [
                 {
                     "id": "mock",
@@ -63,6 +65,12 @@ def test_end_to_end_mock_runner_is_resumable_and_multi_sharded(
     assert job["status"] == "COMPLETE"
     assert job["attempts"] == 1
     assert len(read_archive(job["outputs"]["parquet"])) == 6
+    video_path = Path(job["outputs"]["video"])
+    assert video_path.is_file()
+    with av.open(str(video_path)) as container:
+        assert sum(1 for _ in container.decode(video=0)) == 6
+        assert container.streams.video[0].codec_context.width == 64
+        assert container.streams.video[0].codec_context.height == 48
     schema = pq.read_schema(job["outputs"]["parquet"])
     assert schema.field("crop_id").type == pa.string()
     assert pa.types.is_fixed_size_list(schema.field("keypoints").type)
@@ -71,12 +79,15 @@ def test_end_to_end_mock_runner_is_resumable_and_multi_sharded(
     )
     assert summary_path.is_file()
 
+    video_path.unlink()
     second = ExperimentRunner(config).run()
     assert second["success"]
     assert second["cache_hit"]
     assert second["preprocessing_mode"] == "warm_cache"
     assert second["preprocessing_stage_timings"] == {}
     assert second["jobs"][0]["attempts"] == 1
+    assert Path(second["jobs"][0]["outputs"]["video"]).is_file()
+    assert second["jobs"][0]["outputs"]["video_frames"] == "6"
 
 
 def test_tiled_pipeline_uses_png_shards_and_preserves_every_tile(
@@ -104,6 +115,40 @@ def test_tiled_pipeline_uses_png_shards_and_preserves_every_tile(
     packets = list(iter_artifact(prepared.artifact_path))
     assert len({packet.source_id for packet in packets}) == 24
     assert all(packet.metadata["tile"]["rows"] == 2 for packet in packets)
+
+
+def test_tiled_predictions_render_to_source_frame_count(
+    tmp_path: Path, tiny_video: Path
+) -> None:
+    config = ExperimentConfig.model_validate(
+        {
+            "name": "tile-video",
+            "input": tiny_video,
+            "output_dir": tmp_path / "output",
+            "processors": [
+                {
+                    "type": "tile",
+                    "params": {"rows": 2, "columns": 2, "overlap_ratio": 0.1},
+                }
+            ],
+            "cache": {"root": tmp_path / "cache", "format": "auto"},
+            "video_output": {"enabled": True, "root": tmp_path / "videos"},
+            "models": [
+                {
+                    "id": "mock",
+                    "command": ["{python}", str(REPOSITORY / "runners/mock/run.py")],
+                }
+            ],
+        }
+    )
+
+    result = ExperimentRunner(config).run()
+
+    assert result["success"]
+    assert result["jobs"][0]["outputs"]["records"] == "24"
+    video_path = Path(result["jobs"][0]["outputs"]["video"])
+    with av.open(str(video_path)) as container:
+        assert sum(1 for _ in container.decode(video=0)) == 6
 
 
 def test_oom_restarts_all_shards_with_smaller_batch(tmp_path: Path, tiny_video: Path) -> None:

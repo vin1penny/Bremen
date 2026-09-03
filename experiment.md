@@ -23,12 +23,12 @@ processor or parameter creates a different pipeline identifier and cached artifa
 Models run serially, while each model may distribute the artifact across its reserved
 GPUs.
 
-The main experiment does not downscale model inputs. YOLO Pose uses `--imgsz native`,
-which selects the largest incoming height and width in each batch. The 1920x1080
-source is therefore passed without spatial downscaling. OpenPose uses the nearest
-stride-compatible full-frame network resolution, `1920x1088`. Earlier runs at YOLO
-640 and OpenPose `-1x368` are retained as pilot results and are not mixed with the
-main full-resolution comparisons.
+The main experiment does not downscale full-frame model inputs. YOLO Pose uses the
+fixed target `--imgsz 1920`; the 1920x1080 source therefore retains its spatial
+resolution, while a half-frame tile is enlarged to the same target so tiling can
+actually increase player scale. OpenPose uses the matching stride-compatible network
+resolution, `1920x1088`. Earlier runs at YOLO 640 and OpenPose `-1x368` are retained
+as pilot results and are not mixed with the main full-resolution comparisons.
 
 ## Models
 
@@ -183,6 +183,10 @@ OUTPUT_DIR/
             ├── shard-000.jsonl
             ├── shard-000.stdout.log
             └── shard-000.stderr.log
+
+/mnt/storage2/vincent/football-pose/videos/output/
+└── CONFIGURATION_NAME/EXPERIMENT_ID/
+    └── MODEL_ID-JOB_ID-VIDEO_SETTINGS_ID.mp4
 ```
 
 The IDs prevent results from different pipelines and model settings from colliding.
@@ -198,6 +202,21 @@ Pose and one for OpenPose.
 | `runner/predictions.jsonl` | Merged raw runner predictions | Human-readable debugging and conversion source |
 | `runner/attempt-*/shard-*.jsonl` | Predictions produced by one execution shard | Diagnose sharding and merge behavior |
 | `runner/attempt-*/*.log` | Model-container standard output and errors | Diagnose warnings, crashes, CUDA errors, and dependency problems |
+| Annotated `.mp4` | Processed frames with raw boxes and COCO-17 skeletons | Visual quality control for one model and one pipeline configuration |
+
+Every tracked Lyra configuration enables `video_output`. The renderer reconstructs
+the cached processed packets at the original video resolution, averages overlapping
+tiles, and then overlays predictions in original-frame coordinates. Tile or crop
+boundaries are drawn in gray. The label in the upper-left reports the model, source
+frame, and raw pose count. Videos contain no audio and do not replace the Parquet
+predictions or later quantitative metrics.
+
+The configuration name, experiment ID, job ID, and video-settings ID in the path keep
+videos from different processing pipelines, checkpoints, and rendering settings from
+colliding. A configuration containing YOLO Pose and OpenPose therefore creates two
+MP4 files. The same mechanism also creates an HRNet video when that model is added.
+The resulting path is stored as `jobs[].outputs.video` in both `job.json` and
+`summary.json`; render duration is stored as `jobs[].timings.video_render_seconds`.
 
 `summary.json` is written atomically, but rerunning the same experiment replaces that
 experiment's previous summary with the latest invocation. Preserve invocation-level
@@ -211,7 +230,8 @@ artifact. Artifacts remain under the configured cache root on Lyra and can be
 regenerated from the source video, preprocessing configuration, and implementation.
 Important downloaded results should retain at least the configuration YAML,
 `summary.json`, `job.json`, and the complete `archive/` directory. Logs should also be
-kept for thesis auditability.
+kept for thesis auditability. Annotated videos are reproducible review artifacts and
+are stored separately on the mounted NFS volume because they are comparatively large.
 
 ### Interpreting `records`
 
