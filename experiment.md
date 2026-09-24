@@ -51,18 +51,33 @@ OpenPose, and later HRNet comparisons.
 
 ## Pitch-aware filtering
 
+Correction (2026-09-24): the rectangular fallback is withdrawn. Pitch inference is
+performed on every original frame; only a validated transform from that same frame
+can classify poses. All four pitch boundaries are tested, and the video draws the
+projected pitch polygon clipped to the image. Missing or invalid geometry produces
+`unavailable` decisions (yellow), never an assumed on-pitch result. Geometry is not
+copied across frames because the camera can move or cut. The detection box is kept
+only as diagnostic metadata. Old rectangle-filter results are not valid pitch metrics.
+
+Checkpoint correction: `models/pitch_detection_model_best/best.pt` was exported using
+box mAP as the selection criterion and failed the geometry checks on five sampled
+frames. `models/pitch_detection_model/weights/best.pt` passed those same five checks.
+Use the latter as `pitch-landmarks-best.pt` on Lyra. Its SHA-256 is
+`dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`.
+Full-video boundary accuracy and usable-frame coverage still need server validation;
+unavailable poses remain preserved in raw predictions.
+
 Raw pose output is always preserved. After inference, the pipeline uses the detected
 pitch region to classify the estimated ground point of each person. The ground point
 is the midpoint of confident ankle keypoints, one ankle when only one is reliable, or
 the bottom-center of that person's bounding box as a fallback.
 
-The pitch model supplies a pitch bounding region for each frame. When enough landmark
-correspondences also produce a geometrically consistent homography, the projected
-touchline coordinate provides the finer boundary test. Homographies that fail the
-configured inlier-ratio or reprojection-error checks are rejected; the pitch bounding
-region is then used conservatively. Short gaps may reuse a nearby valid homography.
-The system does not filter against an extrapolated goal line because a broadcast view
-often does not show both goal lines reliably.
+The pitch model supplies landmarks for each frame. Enough consistent landmark
+correspondences are required to estimate the image-to-pitch homography. Homographies
+that fail the configured inlier-ratio or reprojection-error checks are rejected;
+the model's rectangular bounding box is not used for filtering. Failed geometry is
+marked unavailable. Accepted
+transforms test both touchlines and both goal lines in pitch coordinates.
 
 Before pitch classification, predictions from different overlapping tiles are
 deduplicated by person-box IoU in original-frame coordinates. Predictions produced
@@ -246,7 +261,7 @@ the cached processed packets at the original video resolution, averages overlapp
 tiles, and then overlays predictions in original-frame coordinates. Tile or crop
 boundaries are drawn in gray. With pitch filtering enabled, on-pitch poses are green,
 outside-pitch poses red, cross-tile duplicates gray, and unavailable classifications
-yellow. The cyan rectangle shows the pitch model's detected region. The upper-left
+yellow. The cyan polygon shows the accepted frame-specific pitch region. The upper-left
 label reports raw, on-pitch, outside, duplicate, and unknown counts. Videos contain no
 audio and do not replace the Parquet predictions or later quantitative metrics.
 

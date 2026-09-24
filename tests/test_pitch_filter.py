@@ -13,6 +13,7 @@ from football_pose.pitch_filter import (
     PitchGeometryManifest,
     PreparedPitchGeometry,
     _fill_short_gaps,
+    _pitch_polygon,
     postprocess_pitch_predictions,
 )
 
@@ -105,7 +106,7 @@ def test_pitch_filter_deduplicates_tiles_and_rejects_off_pitch_people(
     assert classifications == {"inside", "outside", "duplicate"}
 
 
-def test_pitch_bbox_filters_crowd_when_homography_is_unavailable(
+def test_pitch_bbox_cannot_classify_people_when_homography_is_unavailable(
     tmp_path: Path,
 ) -> None:
     raw_path = tmp_path / "raw.parquet"
@@ -151,10 +152,11 @@ def test_pitch_bbox_filters_crowd_when_homography_is_unavailable(
         ),
     )
 
-    assert result.on_pitch_records == 1
-    assert result.outside_pitch_records == 1
+    assert result.on_pitch_records == 0
+    assert result.outside_pitch_records == 0
+    assert result.unclassified_records == 2
     decisions = pq.read_table(result.decisions_parquet).to_pylist()
-    assert {row["filter_method"] for row in decisions} == {"pitch_bbox"}
+    assert {row["filter_method"] for row in decisions} == {"unavailable"}
 
 
 def test_pitch_geometry_only_fills_short_missing_intervals() -> None:
@@ -186,3 +188,19 @@ def test_pitch_geometry_only_fills_short_missing_intervals() -> None:
     assert filled[1].source == "fallback"
     assert filled[2].source == "fallback"
     assert filled[3].source == "unavailable"
+
+
+def test_pitch_polygon_tracks_camera_translation_and_clips_to_frame() -> None:
+    h = np.array([[100., 0., -1000.], [0., 100., -1000.], [0., 0., 1.]])
+    polygon = _pitch_polygon(h, 100, 100)
+    assert polygon is not None
+    assert np.min(polygon, axis=0).tolist() == [10., 10.]
+    assert np.max(polygon, axis=0).tolist() == [100., 80.]
+    moved = h.copy()
+    moved[1, 2] = -2000.
+    assert np.min(_pitch_polygon(moved, 100, 100), axis=0).tolist() == [10., 20.]
+
+
+def test_pitch_polygon_rejects_horizon_crossing_image() -> None:
+    h = np.array([[100., 0., 0.], [0., 100., 0.], [0.02, 0., -1.]])
+    assert _pitch_polygon(h, 100, 100) is None

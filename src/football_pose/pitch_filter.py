@@ -70,6 +70,7 @@ class PitchGeometryFrame(BaseModel):
 
     frame_index: int = Field(ge=0)
     homography: list[float] | None = None
+    pitch_polygon: list[list[float]] | None = None
     pitch_bbox: tuple[float, float, float, float] | None = None
     source: Literal["observed", "fallback", "bbox_only", "unavailable"]
     landmarks: int = Field(ge=0)
@@ -99,7 +100,7 @@ class PitchGeometryFrame(BaseModel):
 class PitchGeometryManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "football-pose-pitch-geometry-v1"
+    schema_version: str = "football-pose-pitch-geometry-v2"
     geometry_id: str
     source_sha256: str
     checkpoint_sha256: str
@@ -243,6 +244,36 @@ def _pitch_bbox(result: Any) -> tuple[float, float, float, float] | None:
     return bbox  # type: ignore[return-value]
 
 
+def _pitch_polygon(homography: np.ndarray, width: int, height: int) -> list[list[float]] | None:
+    """Clip this frame against the four pitch boundaries in homogeneous coordinates."""
+    # A horizon through the image makes extrapolation unsafe for classification.
+    corners = np.array([[0., 0.], [width, 0.], [width, height], [0., height]])
+    denominators = np.c_[corners, np.ones(4)] @ homography[2]
+    if not (np.all(denominators > 1e-9) or np.all(denominators < -1e-9)):
+        return None
+    h = homography * np.sign(denominators[0])
+    polygon = list(corners)
+    for line in (h[0], PITCH_LENGTH_CM * h[2] - h[0],
+                 h[1], PITCH_WIDTH_CM * h[2] - h[1]):
+        clipped = []
+        if not polygon:
+            return None
+        previous = polygon[-1]
+        previous_distance = float(line @ np.r_[previous, 1.])
+        for point in polygon:
+            distance = float(line @ np.r_[point, 1.])
+            if (distance >= 0) != (previous_distance >= 0):
+                clipped.append(previous + (point - previous) *
+                               previous_distance / (previous_distance - distance))
+            if distance >= 0:
+                clipped.append(point)
+            previous, previous_distance = point, distance
+        polygon = clipped
+    if len(polygon) < 3:
+        return None
+    return np.asarray(polygon).tolist()
+
+
 def _fill_short_gaps(
     frames: list[PitchGeometryFrame], max_fallback_frames: int
 ) -> list[PitchGeometryFrame]:
@@ -362,6 +393,12 @@ class PitchGeometryStore:
                         result, config
                     )
                     pitch_bbox = _pitch_bbox(result)
+                    polygon = (
+                        _pitch_polygon(homography, packet.width, packet.height)
+                        if homography is not None else None
+                    )
+                    if polygon is None:
+                        homography = None
                     frames.append(
                         PitchGeometryFrame(
                             frame_index=packet.frame_index,
@@ -371,11 +408,10 @@ class PitchGeometryStore:
                                 else None
                             ),
                             pitch_bbox=pitch_bbox,
+                            pitch_polygon=polygon,
                             source=(
                                 "observed"
                                 if homography is not None
-                                else "bbox_only"
-                                if pitch_bbox is not None
                                 else "unavailable"
                             ),
                             landmarks=landmarks,
@@ -390,7 +426,7 @@ class PitchGeometryStore:
                 if len(packets) >= config.batch_size:
                     process_batch()
             process_batch()
-            frames = _fill_short_gaps(frames, config.max_fallback_frames)
+            # Never reuse another frame's geometry: the camera may pan or cut.
             manifest = PitchGeometryManifest(
                 geometry_id=identifier,
                 source_sha256=source_sha256,
@@ -400,7 +436,7 @@ class PitchGeometryStore:
                 observed_frames=sum(frame.source == "observed" for frame in frames),
                 bbox_frames=sum(frame.pitch_bbox is not None for frame in frames),
                 usable_frames=sum(
-                    frame.homography is not None or frame.pitch_bbox is not None
+                    frame.homography is not None
                     for frame in frames
                 ),
                 processing_seconds=time.perf_counter() - start,
@@ -596,7 +632,6 @@ def postprocess_pitch_predictions(
             if geometry_frame is not None and geometry_frame.homography is not None
             else None
         )
-        pitch_bbox = geometry_frame.pitch_bbox if geometry_frame is not None else None
         for index, record in enumerate(frame_records):
             anchor_x, anchor_y, anchor_method = _ground_anchor(
                 record, config.ankle_confidence
@@ -608,53 +643,29 @@ def postprocess_pitch_predictions(
                 classification = "duplicate"
                 filter_method = "cross_region_iou"
                 duplicate_count += 1
-            elif geometry_frame is None:
+            elif homography is None:
                 classification = "unavailable"
                 filter_method = "unavailable"
                 unclassified_count += 1
             else:
-                bbox_inside = True
-                if pitch_bbox is not None:
-                    margin_px = config.pitch_bbox_margin_px
-                    bbox_inside = (
-                        pitch_bbox[0] - margin_px <= anchor_x <= pitch_bbox[2] + margin_px
-                        and pitch_bbox[1] - margin_px
-                        <= anchor_y
-                        <= pitch_bbox[3] + margin_px
-                    )
-                if pitch_bbox is not None and not bbox_inside:
-                    classification = "outside"
-                    filter_method = "pitch_bbox"
-                    outside_count += 1
-                elif homography is not None:
-                    point = _pitch_point(homography, anchor_x, anchor_y)
-                    if point is None:
-                        if pitch_bbox is not None:
-                            classification = "inside"
-                            filter_method = "pitch_bbox_fallback"
-                            on_pitch.append(record)
-                        else:
-                            classification = "unavailable"
-                            filter_method = "unavailable"
-                            unclassified_count += 1
-                    else:
-                        pitch_x, pitch_y = point
-                        margin = config.pitch_margin_cm
-                        inside = -margin <= pitch_y <= PITCH_WIDTH_CM + margin
-                        classification = "inside" if inside else "outside"
-                        filter_method = "touchline_homography"
-                        if inside:
-                            on_pitch.append(record)
-                        else:
-                            outside_count += 1
-                elif pitch_bbox is not None:
-                    classification = "inside"
-                    filter_method = "pitch_bbox"
-                    on_pitch.append(record)
-                else:
+                point = _pitch_point(homography, anchor_x, anchor_y)
+                if point is None:
                     classification = "unavailable"
                     filter_method = "unavailable"
                     unclassified_count += 1
+                else:
+                    pitch_x, pitch_y = point
+                    margin = config.pitch_margin_cm
+                    inside = (
+                        -margin <= pitch_x <= PITCH_LENGTH_CM + margin
+                        and -margin <= pitch_y <= PITCH_WIDTH_CM + margin
+                    )
+                    classification = "inside" if inside else "outside"
+                    filter_method = "frame_pitch_homography"
+                    if inside:
+                        on_pitch.append(record)
+                    else:
+                        outside_count += 1
             decisions.append(
                 {
                     "frame_index": frame_index,

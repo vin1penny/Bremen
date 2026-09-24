@@ -154,5 +154,5 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
     )
     assert loaded.pitch_filter.enabled
     assert loaded.pitch_filter.checkpoint == Path(
-        "/home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt"
+        "/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt"
     )

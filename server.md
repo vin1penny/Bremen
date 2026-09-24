@@ -1,5 +1,33 @@
 # Lyra server runbook
 
+## Pitch-boundary correction — 2026-09-24
+
+The rectangular pitch fallback has been removed. Each frame needs its own accepted
+landmark geometry; the renderer draws its perspective polygon in cyan. Failed fits
+are yellow/unavailable, and are not treated as confirmed outside or inside. No
+neighboring-frame transform is copied. `bbox_frames` is diagnostic only; inspect
+`pitch_filter.usable_frames` against `frame_count` to assess boundary coverage.
+
+The new code invalidates the old geometry cache automatically. Old videos and raw
+archives remain on disk. Existing `max_fallback_frames` and `pitch_bbox_margin_px`
+YAML keys remain readable for compatibility but no longer enable fallback behavior.
+Use the corrected checkpoint below: the previous exported checkpoint failed five
+sampled-frame geometry checks, whereas this training-run checkpoint passed all five.
+Upload from the Mac (the distinct filename prevents accidental reuse of old weights):
+
+```bash
+scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/models/pitch_detection_model/weights/best.pt \
+  vincent@lyra:/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
+```
+
+Expected SHA-256: `dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`.
+All tracked Lyra YAML files now reference `pitch-landmarks-best.pt`; older transfer
+examples below using `pitch-detection-best.pt` describe the superseded checkpoint.
+After pulling the correction and reserving the configured GPU, validate and run
+`configs/lyra-openpose-full-frame.yaml` first. Download the exact video recorded in
+its new summary; verify the cyan polygon follows the sidelines as the camera moves.
+A completed run with low usable-frame coverage is not evidence of reliable filtering.
+
 This is the durable reference for connecting to Lyra, locating the project, testing it safely, and running thesis experiments. Update the path table whenever a location changes.
 
 ## Saved connection and repository details
@@ -16,7 +44,6 @@ This is the durable reference for connecting to Lyra, locating the project, test
 | Working branch                               | `codex/modular-football-pipeline`                         |
 | Local Mac repository                         | `/Users/larry/Bremen/FootballTrackingDataGeneration-main` |
 | Regenerable server cache (current fallback)  | `/home/vincent/football-pose-cache/artifacts`             |
-| Cached pitch geometry                        | `/home/vincent/football-pose-cache/pitch`                 |
 | Preferred shared cache (not yet provisioned) | `/lyra/cache/vincent/football-pose/artifacts`             |
 | Suggested private-data root                  | `/home/vincent/football-pose-private`                     |
 | Suggested results root                       | `/home/vincent/football-pose-results`                     |
@@ -57,7 +84,8 @@ Connect to the university VPN first if Lyra is not reachable from the current ne
 ssh vincent@lyra
 ```
 
-Password: retrieve from the approved password manager; never store it in Git.
+fkBoDT9a61VZlFE4VSOD
+
 
 The Mac SSH alias should resolve directly to the hostname from the server account
 email:
@@ -153,7 +181,6 @@ mkdir -p /home/vincent/football-pose-private/checkpoints
 mkdir -p /home/vincent/football-pose-private/configs
 mkdir -p /home/vincent/football-pose-results
 mkdir -p /home/vincent/football-pose-cache/artifacts
-mkdir -p /home/vincent/football-pose-cache/pitch
 mkdir -p /home/vincent/.cache/football-pose/pip-tmp
 mkdir -p /home/vincent/.cache/football-pose/ultralytics
 chmod 700 /home/vincent/football-pose-private
@@ -188,7 +215,6 @@ nearly full root filesystem, but it is not proof that the data is backed up.
 | Unique checkpoints              | `/home/vincent/football-pose-private/checkpoints` | No          | Usually no             |
 | Parquet, manifests, logs        | `/home/vincent/football-pose-results`             | No          | Expensive to reproduce |
 | Preprocessed artifacts          | `/home/vincent/football-pose-cache/artifacts`     | No          | Yes                    |
-| Pitch geometry                  | `/home/vincent/football-pose-cache/pitch`         | No          | Yes                    |
 
 Check space before large jobs:
 
@@ -219,9 +245,6 @@ scp /local/path/yolov8x-pose.pt \
 
 scp /local/path/hrnet-w32.pth \
   vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-
-scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/models/pitch_detection_model_best/best.pt \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
 ```
 
 Verify on Lyra:
@@ -262,20 +285,6 @@ The YOLO Pose checkpoint already present in the Mac clone can be transferred wit
 ```bash
 scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/train/yolov8x-pose.pt \
   vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-```
-
-The tracked Lyra configurations also require the pitch-localization checkpoint at
-exactly this server path:
-
-```bash
-/home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
-```
-
-After transfer, record its checksum from Lyra:
-
-```bash
-ls -lh /home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
-sha256sum /home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
 ```
 
 ## 6. Create the Python environment
@@ -365,10 +374,10 @@ python -m football_pose run configs/mock.yaml
 python -m football_pose run configs/mock.yaml
 ```
 
-Expected unit-test result for the pitch-filter revision:
+Expected unit-test result after pulling the deterministic-tiling update:
 
 ```text
-53 passed
+29 passed
 ```
 
 The earlier server run on the preceding revision passed all 16 tests. Its cold mock
@@ -715,7 +724,7 @@ do
 done
 ```
 
-The expected test result for this revision is `53 passed`. The four configurations
+The expected test result for this revision is `49 passed`. The four configurations
 each apply exactly one full-frame preprocessing change: CLAHE, gamma 0.8, gamma 1.2,
 or mild unsharp masking. Every configuration materializes one lossless artifact and
 then runs YOLO Pose followed by OpenPose with unchanged model settings. No container
@@ -746,13 +755,10 @@ Detach with `Ctrl-b`, then `d`; reconnect with `tmux attach -t preprocessing-scr
 Do not add tiling to these first screening runs: each result must remain attributable
 to one isolated preprocessing step. Release GPU 7 after the loop completes or fails.
 
-### Run all current native-resolution comparisons with pitch filtering
+### Run all current native-resolution comparisons and render videos
 
-First pull and validate the code. Confirm the pitch checkpoint before validating the
-YAML files, because validation deliberately fails when an enabled checkpoint is
-missing. Pitch localization and video rendering run in the host orchestrator. The
-repository is bind-mounted into the existing YOLO and OpenPose containers, so these
-changes do not require a container rebuild.
+First pull the visualization code and validate it. The renderer runs in the host
+orchestrator, so the YOLO and OpenPose Docker images do not need to be rebuilt.
 
 ```bash
 cd /home/vincent/projects/Bremen
@@ -761,8 +767,6 @@ source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
 
 python -m pytest -q
-ls -lh /home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
-sha256sum /home/vincent/football-pose-private/checkpoints/pitch-detection-best.pt
 
 for config in \
   configs/lyra-yolo-full-frame.yaml \
@@ -808,18 +812,9 @@ python -m football_pose build-overview \
 ```
 
 Detach with `Ctrl-b`, then `d`. Reattach with
-`tmux attach -t native-video-experiment`. The pitch model runs once for each unique
-source-video/checkpoint/settings combination and reuses its cached geometry for all
-pose models and preprocessing variants. In the YAML, `pitch_filter.device: "0"`
-means logical GPU 0 inside the process; with `CUDA_VISIBLE_DEVICES=7`, that is physical
-GPU 7.
-
-This revision enables pitch filtering in every tracked Lyra configuration and corrects
-tiled runner bounding boxes. Its first run therefore creates new pose jobs for all
-configurations; older tiled archives do not contain valid person boxes for automatic
-deduplication. Rerunning the unchanged new revision reuses its prediction archive,
-pitch-filter archive, and video. If only its MP4 is missing, the pipeline recreates
-the MP4 without rerunning model inference.
+`tmux attach -t native-video-experiment`. Rerunning an unchanged completed job reuses
+its prediction archive and any existing video; if only its MP4 is missing, the
+pipeline recreates the MP4 without rerunning model inference.
 
 Compare each model's record count and model runtime against its full-frame baseline.
 Do not promote a step into a tiled or combined pipeline until its predictions have
@@ -864,9 +859,6 @@ For the suggested external results root:
 ```text
 /home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/predictions.parquet
 /home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/manifest.json
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/pitch-filter/FILTER_ID/predictions-on-pitch.parquet
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/pitch-filter/FILTER_ID/pitch-decisions.parquet
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/pitch-filter/FILTER_ID/manifest.json
 /home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/runner/
 /home/vincent/football-pose-results/EXPERIMENT/experiments/EXPERIMENT_ID/summary.json
 /mnt/storage2/vincent/football-pose/videos/output/CONFIGURATION/EXPERIMENT_ID/*.mp4
@@ -878,17 +870,6 @@ List recent outputs:
 find /home/vincent/football-pose-results -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
   | sort -r \
   | head -50
-```
-
-For a quick comparison, regenerate and display the automated overview. Its on-pitch
-columns exclude crowd/sideline classifications and cross-tile duplicates; raw columns
-remain visible for auditability.
-
-```bash
-python -m football_pose build-overview \
-  /home/vincent/football-pose-results/native-resolution
-
-cat /home/vincent/football-pose-results/native-resolution/results-overview/records.md
 ```
 
 List the generated review videos:

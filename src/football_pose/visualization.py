@@ -151,13 +151,13 @@ def _draw_regions(image: np.ndarray, packets: list[FramePacket], thickness: int)
 
 def _draw_pitch_region(
     image: np.ndarray,
-    pitch_bbox: tuple[float, float, float, float] | None,
+    pitch_polygon: list[list[float]] | None,
     thickness: int,
 ) -> None:
-    if pitch_bbox is None:
+    if pitch_polygon is None:
         return
-    x1, y1, x2, y2 = (int(round(value)) for value in pitch_bbox)
-    cv2.rectangle(image, (x1, y1), (x2, y2), (255, 180, 0), thickness)
+    polygon = np.rint(pitch_polygon).astype(np.int32).reshape(-1, 1, 2)
+    cv2.polylines(image, [polygon], True, (255, 180, 0), thickness)
 
 
 def _draw_predictions(
@@ -267,17 +267,15 @@ def render_annotated_video(
                     str(decision["person_id"]),
                 )
             ] = str(decision["classification"])
-    pitch_bboxes: dict[int, tuple[float, float, float, float]] = {}
+    pitch_polygons: dict[int, list[list[float]]] = {}
     if pitch_geometry_json is not None:
         geometry_payload = json.loads(
             Path(pitch_geometry_json).read_text(encoding="utf-8")
         )
         for geometry_frame in geometry_payload.get("frames", []):
-            bbox = geometry_frame.get("pitch_bbox")
-            if bbox is not None:
-                pitch_bboxes[int(geometry_frame["frame_index"])] = tuple(
-                    float(value) for value in bbox
-                )  # type: ignore[assignment]
+            polygon = geometry_frame.get("pitch_polygon")
+            if polygon is not None:
+                pitch_polygons[int(geometry_frame["frame_index"])] = polygon
 
     artifact_groups = iter(
         groupby(iter_artifact(artifact_path), key=lambda packet: packet.frame_index)
@@ -309,7 +307,7 @@ def render_annotated_video(
                     _draw_regions(image, processed_packets, max(1, round(info.width / 960)))
                 _draw_pitch_region(
                     image,
-                    pitch_bboxes.get(source_packet.frame_index),
+                    pitch_polygons.get(source_packet.frame_index),
                     max(1, round(info.width / 960)),
                 )
                 _draw_predictions(
