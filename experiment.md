@@ -66,6 +66,9 @@ each training run, checkpoint hash and `pitch-validation.json`. Select using the
 saved checkpoint's pose validation metrics; box accuracy is not the selection
 criterion. Inspect the new checkpoint on the video before making its versioned
 path the production checkpoint. Training and evaluation splits must remain separate.
+The production candidate uses the settings that previously achieved strong landmark
+validation: YOLOv8n-pose, 640 pixels, batch 2, 50 epochs, and mosaic disabled. A
+20-epoch batch-16 server run produced pose mAP50 0.322 and is explicitly rejected.
 
 Correction (2026-09-24): the rectangular fallback is withdrawn. Pitch inference is
 performed on every original frame; only a validated transform from that same frame

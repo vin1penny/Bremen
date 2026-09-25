@@ -9,8 +9,11 @@ when calibration fails. Cyan remains the fitted outer boundary. All finite raw
 landmarks are saved in geometry.json; old geometry caches invalidate automatically.
 
 Train the pitch model only using the server entry point corresponding to the pitch
-section of `train/train_remote.ipynb`. It uses the same dataset version 15, model,
-640 input size, batch 16, 20 epochs, and no mosaic. Each run gets a unique directory.
+section of `train/train_remote.ipynb`. It uses the proven local settings: dataset
+version 15, YOLOv8n-pose, 640 input size, batch 2, 50 epochs, and no mosaic. The
+previous server run with batch 16 and 20 epochs reached only pose mAP50 0.322 and
+pose mAP50–95 0.055; do not use its checkpoint. The earlier 50-epoch, batch-2 run
+reached 0.984 and 0.614 respectively. Each run gets a unique directory.
 The script validates the saved checkpoint using **pose** metrics, not box metrics.
 The notebook's export comparison has also been corrected to validated pose mAP50–95.
 

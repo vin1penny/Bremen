@@ -12,7 +12,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch", type=int, default=2)
     args = parser.parse_args()
     import yaml
     from ultralytics import YOLO
@@ -35,17 +36,18 @@ def main() -> None:
     normalized_data.write_text(yaml.safe_dump(config))
     model = YOLO("yolov8n-pose.pt")
     model.train(data=str(normalized_data), project=str(args.project.resolve()), name=name,
-                epochs=args.epochs, batch=16, imgsz=640, mosaic=0.0,
+                epochs=args.epochs, batch=args.batch, imgsz=640, mosaic=0.0,
                 device=0, workers=4, seed=0, deterministic=True, exist_ok=False)
     checkpoint = Path(model.trainer.best)
     metrics = YOLO(str(checkpoint)).val(data=str(normalized_data), device=0, imgsz=640,
-                                       batch=16, workers=4)
+                                       batch=args.batch, workers=4)
     with checkpoint.open("rb") as stream:
         checkpoint_hash = hashlib.file_digest(stream, "sha256").hexdigest()
     payload = {
         "checkpoint": str(checkpoint),
         "sha256": checkpoint_hash,
-        "data": str(data), "metric": "pose_mAP50-95",
+        "data": str(data), "epochs": args.epochs, "batch": args.batch,
+        "metric": "pose_mAP50-95",
         "pose_mAP50": float(metrics.pose.map50),
         "pose_mAP50-95": float(metrics.pose.map),
         "metrics": metrics.results_dict,
