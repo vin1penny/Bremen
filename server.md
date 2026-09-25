@@ -9,8 +9,10 @@ when calibration fails. Cyan remains the fitted outer boundary. All finite raw
 landmarks are saved in geometry.json; old geometry caches invalidate automatically.
 
 Train the pitch model only using the server entry point corresponding to the pitch
-section of `train/train_remote.ipynb`. It uses the proven local settings: dataset
-version 15, YOLOv8n-pose, 640 input size, batch 2, 50 epochs, and no mosaic. The
+section of `train/train_remote.ipynb`. The current high-resolution candidate uses
+dataset version 15, YOLOv8n-pose, 1280 input size, batch 8, 100 epochs, and no mosaic.
+This setting was chosen on 2026-09-25 and must be evaluated against the earlier run.
+For reference, the proven local settings were 640, batch 2, and 50 epochs. The
 previous server run with batch 16 and 20 epochs reached only pose mAP50 0.322 and
 pose mAP50–95 0.055; do not use its checkpoint. The earlier 50-epoch, batch-2 run
 reached 0.984 and 0.614 respectively. Each run gets a unique directory.
@@ -42,7 +44,8 @@ source .venv/bin/activate
 export PYTHONPATH="$PWD/src"
 CUDA_VISIBLE_DEVICES=7 python train/train_pitch_server.py \
   --data /home/vincent/football-pose-private/datasets/football-field-detection-15/data.yaml \
-  --project /home/vincent/football-pose-private/pitch-training
+  --project /home/vincent/football-pose-private/pitch-training \
+  --imgsz 1280 --epochs 100 --batch 8
 ```
 
 Detach with Ctrl+B then D; return using `tmux attach -t pitch-training`.

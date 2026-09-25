@@ -11,7 +11,7 @@ pitch_filter:
   checkpoint: /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
   cache_root: /home/vincent/football-pose-cache/pitch
   device: "0"
-  image_size: 640
+  image_size: 1280
   batch_size: 16
   detection_confidence: 0.25
   landmark_confidence: 0.5
