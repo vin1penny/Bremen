@@ -62,7 +62,8 @@ acceptance; the cyan polygon shows the fitted outer boundary.
 
 Pitch training follows the pitch section of `train/train_remote.ipynb`, available
 as `train/train_pitch_server.py` for tmux. Use the version-15 dataset and preserve
-each training run, checkpoint hash and `pitch-validation.json`. Select using the
+the checkpoint hash and `pitch-validation.json`; the fixed `pitch-production`
+directory is overwritten by subsequent training runs. Select using the
 saved checkpoint's pose validation metrics; box accuracy is not the selection
 criterion. Inspect the new checkpoint on the video before making its versioned
 path the production checkpoint. Training and evaluation splits must remain separate.

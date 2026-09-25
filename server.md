@@ -15,7 +15,9 @@ This setting was chosen on 2026-09-25 and must be evaluated against the earlier 
 For reference, the proven local settings were 640, batch 2, and 50 epochs. The
 previous server run with batch 16 and 20 epochs reached only pose mAP50 0.322 and
 pose mAP50–95 0.055; do not use its checkpoint. The earlier 50-epoch, batch-2 run
-reached 0.984 and 0.614 respectively. Each run gets a unique directory.
+reached 0.984 and 0.614 respectively. Server training reuses the fixed
+`pitch-production` directory and overwrites its weights on the next run. The
+validation file records the resulting checkpoint hash and metrics.
 The script validates the saved checkpoint using **pose** metrics, not box metrics.
 The notebook's export comparison has also been corrected to validated pose mAP50–95.
 
@@ -54,9 +56,9 @@ Training prints the exact checkpoint path, SHA-256 and validation metrics and sa
 video: copy the experiment YAML to a new file **inside configs/** and change only
 `pitch_filter.checkpoint` to the printed absolute path. Run this copied config
 with `CUDA_VISIBLE_DEVICES=7`. Inspect landmark alignment and boundary coverage.
-After validation, use that same versioned checkpoint path in production configs;
-do not overwrite the previous weights. No newly trained weights exist until this
-server training completes. The initial YOLO backbone may download on first use.
+After validation, copy that checkpoint to the production checkpoint path referenced
+by the configs. No newly trained weights exist until server training completes. The
+initial YOLO backbone may download on first use.
 
 
 ## Pitch-boundary correction — 2026-09-24

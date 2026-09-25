@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -15,6 +14,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--imgsz", type=int, default=1280)
+    parser.add_argument("--name", default="pitch-production")
     args = parser.parse_args()
     import yaml
     from ultralytics import YOLO
@@ -23,7 +23,7 @@ def main() -> None:
     config = yaml.safe_load(data.read_text())
     if config.get("kpt_shape") != [32, 3]:
         raise ValueError("Expected the notebook's 32-landmark pitch dataset ([32, 3]).")
-    name = "pitch-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    name = args.name
     # Roboflow exports often contain ../train paths or paths from another machine.
     # Resolve the known exported layout without modifying the source dataset.
     config["path"] = str(data.parent)
@@ -38,7 +38,7 @@ def main() -> None:
     model = YOLO("yolov8n-pose.pt")
     model.train(data=str(normalized_data), project=str(args.project.resolve()), name=name,
                 epochs=args.epochs, batch=args.batch, imgsz=args.imgsz, mosaic=0.0,
-                device=0, workers=4, seed=0, deterministic=True, exist_ok=False)
+                device=0, workers=4, seed=0, deterministic=True, exist_ok=True)
     checkpoint = Path(model.trainer.best)
     metrics = YOLO(str(checkpoint)).val(data=str(normalized_data), device=0,
                                        imgsz=args.imgsz,
