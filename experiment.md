@@ -72,6 +72,13 @@ The high-resolution production candidate selected on 2026-09-25 uses YOLOv8n-pos
 640-pixel, batch-2, 50-epoch run, which achieved strong landmark validation. A
 640-pixel, 20-epoch, batch-16 server run produced pose mAP50 0.322 and is rejected.
 
+Before selecting production weights, run `lyra-pitch-weights-earlier.yaml` and
+`lyra-pitch-weights-new-1280.yaml`. Both use pitch inference at 1280 with identical
+thresholds on the same video; their checkpoint and output paths are the only pitch
+differences. Compare geometry coverage, reprojection diagnostics, classification
+counts, and the labelled landmark videos. Validation-set scores and video behavior
+are both reported; neither is replaced by raw pose-record yield.
+
 Correction (2026-09-24): the rectangular fallback is withdrawn. Pitch inference is
 performed on every original frame; only a validated transform from that same frame
 can classify poses. All four pitch boundaries are tested, and the video draws the

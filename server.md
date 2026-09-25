@@ -60,6 +60,35 @@ After validation, copy that checkpoint to the production checkpoint path referen
 by the configs. No newly trained weights exist until server training completes. The
 initial YOLO backbone may download on first use.
 
+### Compare the earlier and new pitch weights
+
+Do not overwrite `checkpoints/pitch-landmarks-best.pt` before this comparison. The
+two configs use identical 1280 inference settings and thresholds; only their pitch
+checkpoint and output directory differ. Confirm the hashes first:
+
+```bash
+sha256sum \
+  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt \
+  /home/vincent/football-pose-private/pitch-training/pitch-production/weights/best.pt
+```
+
+Expected hashes are `dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`
+for the earlier weights and `f9529826820fff8ce7e1657d0d901f296907e52db9491e60855eb7ab349102e7`
+for the new weights. If the first hash is already the new hash, upload the earlier
+local checkpoint again before running the comparison.
+
+Run both sequentially inside tmux:
+
+```bash
+CUDA_VISIBLE_DEVICES=7 python -m football_pose run configs/lyra-pitch-weights-earlier.yaml
+CUDA_VISIBLE_DEVICES=7 python -m football_pose run configs/lyra-pitch-weights-new-1280.yaml
+```
+
+Compare `usable_frames`, `on_pitch_records`, `outside_pitch_records`,
+`unclassified_records`, median reprojection diagnostics, and both output videos.
+Choose the production checkpoint only after visually checking that magenta landmark
+IDs sit on their intended field intersections throughout camera movement.
+
 
 ## Pitch-boundary correction — 2026-09-24
 
