@@ -160,6 +160,20 @@ def _draw_pitch_region(
     cv2.polylines(image, [polygon], True, (255, 180, 0), thickness)
 
 
+def _draw_pitch_keypoints(image: np.ndarray, points: list[dict], thickness: int) -> None:
+    for point in points:
+        # Retain all raw predictions in the geometry archive, display reliable ones.
+        if point["confidence"] < 0.5:
+            continue
+        x, y = int(round(point["x"])), int(round(point["y"]))
+        if not (0 <= x < image.shape[1] and 0 <= y < image.shape[0]):
+            continue
+        cv2.circle(image, (x, y), 3 * thickness, (255, 0, 255), -1)
+        cv2.putText(image, f'P{point["id"]} {point["confidence"]:.2f}',
+                    (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.4 * thickness, (255, 0, 255), thickness)
+
+
 def _draw_predictions(
     image: np.ndarray,
     predictions: list[dict[str, Any]],
@@ -268,11 +282,13 @@ def render_annotated_video(
                 )
             ] = str(decision["classification"])
     pitch_polygons: dict[int, list[list[float]]] = {}
+    pitch_keypoints: dict[int, list[dict]] = {}
     if pitch_geometry_json is not None:
         geometry_payload = json.loads(
             Path(pitch_geometry_json).read_text(encoding="utf-8")
         )
         for geometry_frame in geometry_payload.get("frames", []):
+            pitch_keypoints[int(geometry_frame["frame_index"])] = geometry_frame.get("predicted_keypoints", [])
             polygon = geometry_frame.get("pitch_polygon")
             if polygon is not None:
                 pitch_polygons[int(geometry_frame["frame_index"])] = polygon
@@ -310,6 +326,8 @@ def render_annotated_video(
                     pitch_polygons.get(source_packet.frame_index),
                     max(1, round(info.width / 960)),
                 )
+                _draw_pitch_keypoints(image, pitch_keypoints.get(source_packet.frame_index, []),
+                                      max(1, round(info.width / 960)))
                 _draw_predictions(
                     image,
                     predictions_by_frame.get(source_packet.frame_index, []),

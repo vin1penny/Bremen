@@ -1,5 +1,58 @@
 # Lyra server runbook
 
+## Weserstadion calibration and pitch training (2026-09-25)
+
+Pitch coordinates are now hard-coded for **Weserstadion, Bremen: 105 × 68 m**.
+This assumption must be changed for other venues. Video overlays show magenta
+predicted landmarks labelled P0–P31 and confidence (display threshold 0.5), even
+when calibration fails. Cyan remains the fitted outer boundary. All finite raw
+landmarks are saved in geometry.json; old geometry caches invalidate automatically.
+
+Train the pitch model only using the server entry point corresponding to the pitch
+section of `train/train_remote.ipynb`. It uses the same dataset version 15, model,
+640 input size, batch 16, 20 epochs, and no mosaic. Each run gets a unique directory.
+The script validates the saved checkpoint using **pose** metrics, not box metrics.
+The notebook's export comparison has also been corrected to validated pose mAP50–95.
+
+From the Mac, upload the existing version-15 dataset (includes its data.yaml):
+
+```bash
+ssh vincent@lyra 'mkdir -p /home/vincent/football-pose-private/datasets'
+scp -r /Users/larry/Bremen/FootballTrackingDataGeneration-main/train/datasets/football-field-detection-15 \
+  vincent@lyra:/home/vincent/football-pose-private/datasets/
+```
+
+On Lyra, pull the changes, check GPU availability, then create/attach tmux:
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+nvidia-smi
+tmux new -A -s pitch-training
+```
+
+Inside tmux (GPU 7 must be available and permitted):
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+CUDA_VISIBLE_DEVICES=7 python train/train_pitch_server.py \
+  --data /home/vincent/football-pose-private/datasets/football-field-detection-15/data.yaml \
+  --project /home/vincent/football-pose-private/pitch-training
+```
+
+Detach with Ctrl+B then D; return using `tmux attach -t pitch-training`.
+Training prints the exact checkpoint path, SHA-256 and validation metrics and saves
+`pitch-validation.json` in that run directory. First test that checkpoint on the
+video: copy the experiment YAML to a new file **inside configs/** and change only
+`pitch_filter.checkpoint` to the printed absolute path. Run this copied config
+with `CUDA_VISIBLE_DEVICES=7`. Inspect landmark alignment and boundary coverage.
+After validation, use that same versioned checkpoint path in production configs;
+do not overwrite the previous weights. No newly trained weights exist until this
+server training completes. The initial YOLO backbone may download on first use.
+
+
 ## Pitch-boundary correction — 2026-09-24
 
 The rectangular pitch fallback has been removed. Each frame needs its own accepted

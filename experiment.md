@@ -51,6 +51,22 @@ OpenPose, and later HRNet comparisons.
 
 ## Pitch-aware filtering
 
+As of 2026-09-25, the pitch template is explicitly **Weserstadion, Bremen,
+105 × 68 metres** (centimetre coordinates, corner origin). Fixed-size markings
+retain their physical dimensions: penalty depth 16.5 m, goal area depth 5.5 m,
+penalty spot 11 m and centre-circle radius 9.15 m. Other venues require a different
+template. This changes calibration and invalidates the previous geometry cache.
+Each frame now archives landmark IDs, pixel coordinates and confidence values.
+Magenta P0–P31 labels show predictions with confidence ≥0.5 independently of fit
+acceptance; the cyan polygon shows the fitted outer boundary.
+
+Pitch training follows the pitch section of `train/train_remote.ipynb`, available
+as `train/train_pitch_server.py` for tmux. Use the version-15 dataset and preserve
+each training run, checkpoint hash and `pitch-validation.json`. Select using the
+saved checkpoint's pose validation metrics; box accuracy is not the selection
+criterion. Inspect the new checkpoint on the video before making its versioned
+path the production checkpoint. Training and evaluation splits must remain separate.
+
 Correction (2026-09-24): the rectangular fallback is withdrawn. Pitch inference is
 performed on every original frame; only a validated transform from that same frame
 can classify poses. All four pitch boundaries are tested, and the video draws the

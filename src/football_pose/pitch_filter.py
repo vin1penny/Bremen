@@ -24,42 +24,44 @@ from football_pose.jobs import atomic_write_json
 from football_pose.video import VideoSource
 
 
-PITCH_LENGTH_CM = 12_000.0
-PITCH_WIDTH_CM = 7_000.0
+# Weserstadion, Bremen only. Keep landmark IDs in the training dataset's order.
+# Fixed-size markings (penalty area, goal area, centre circle) are not scaled.
+PITCH_LENGTH_CM = 10_500.0
+PITCH_WIDTH_CM = 6_800.0
 PITCH_VERTICES = np.asarray(
     [
         (0, 0),
-        (0, 1450),
-        (0, 2584),
-        (0, 4416),
-        (0, 5550),
-        (0, 7000),
-        (550, 2584),
-        (550, 4416),
-        (1100, 3500),
-        (2015, 1450),
-        (2015, 2584),
-        (2015, 4416),
-        (2015, 5550),
-        (6000, 0),
-        (6000, 2585),
-        (6000, 4415),
-        (6000, 7000),
-        (9985, 1450),
-        (9985, 2584),
-        (9985, 4416),
-        (9985, 5550),
-        (10900, 3500),
-        (11450, 2584),
-        (11450, 4416),
-        (12000, 0),
-        (12000, 1450),
-        (12000, 2584),
-        (12000, 4416),
-        (12000, 5550),
-        (12000, 7000),
-        (5085, 3500),
-        (6915, 3500),
+        (0, 1384),
+        (0, 2484),
+        (0, 4316),
+        (0, 5416),
+        (0, 6800),
+        (550, 2484),
+        (550, 4316),
+        (1100, 3400),
+        (1650, 1384),
+        (1650, 2484),
+        (1650, 4316),
+        (1650, 5416),
+        (5250, 0),
+        (5250, 2485),
+        (5250, 4315),
+        (5250, 6800),
+        (8850, 1384),
+        (8850, 2484),
+        (8850, 4316),
+        (8850, 5416),
+        (9400, 3400),
+        (9950, 2484),
+        (9950, 4316),
+        (10500, 0),
+        (10500, 1384),
+        (10500, 2484),
+        (10500, 4316),
+        (10500, 5416),
+        (10500, 6800),
+        (4335, 3400),
+        (6165, 3400),
     ],
     dtype=np.float64,
 )
@@ -71,6 +73,7 @@ class PitchGeometryFrame(BaseModel):
     frame_index: int = Field(ge=0)
     homography: list[float] | None = None
     pitch_polygon: list[list[float]] | None = None
+    predicted_keypoints: list[dict[str, float | int]] = Field(default_factory=list)
     pitch_bbox: tuple[float, float, float, float] | None = None
     source: Literal["observed", "fallback", "bbox_only", "unavailable"]
     landmarks: int = Field(ge=0)
@@ -100,7 +103,7 @@ class PitchGeometryFrame(BaseModel):
 class PitchGeometryManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "football-pose-pitch-geometry-v2"
+    schema_version: str = "football-pose-pitch-geometry-v3"
     geometry_id: str
     source_sha256: str
     checkpoint_sha256: str
@@ -242,6 +245,23 @@ def _pitch_bbox(result: Any) -> tuple[float, float, float, float] | None:
     if len(bbox) != 4 or not np.isfinite(bbox).all():
         return None
     return bbox  # type: ignore[return-value]
+
+
+def _predicted_keypoints(result: Any, threshold: float) -> list[dict[str, float | int]]:
+    keypoints = getattr(result, "keypoints", None)
+    if keypoints is None or keypoints.conf is None:
+        return []
+    xy = keypoints.xy.detach().cpu().numpy()
+    confidence = keypoints.conf.detach().cpu().numpy()
+    if xy.ndim != 3 or not len(xy) or xy.shape[1] != len(PITCH_VERTICES):
+        return []
+    candidate = int(np.argmax(np.sum(confidence >= threshold, axis=1)))
+    return [
+        {"id": index, "x": float(point[0]), "y": float(point[1]),
+         "confidence": float(score)}
+        for index, (point, score) in enumerate(zip(xy[candidate], confidence[candidate]))
+        if np.isfinite(point).all() and np.isfinite(score)
+    ]
 
 
 def _pitch_polygon(homography: np.ndarray, width: int, height: int) -> list[list[float]] | None:
@@ -409,6 +429,7 @@ class PitchGeometryStore:
                             ),
                             pitch_bbox=pitch_bbox,
                             pitch_polygon=polygon,
+                            predicted_keypoints=_predicted_keypoints(result, config.landmark_confidence),
                             source=(
                                 "observed"
                                 if homography is not None

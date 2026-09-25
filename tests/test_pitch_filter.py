@@ -14,8 +14,20 @@ from football_pose.pitch_filter import (
     PreparedPitchGeometry,
     _fill_short_gaps,
     _pitch_polygon,
+    PITCH_LENGTH_CM,
+    PITCH_WIDTH_CM,
+    PITCH_VERTICES,
     postprocess_pitch_predictions,
 )
+
+
+def test_weserstadion_landmark_geometry() -> None:
+    assert (PITCH_LENGTH_CM, PITCH_WIDTH_CM) == (10500, 6800)
+    assert PITCH_VERTICES.shape == (32, 2)
+    assert PITCH_VERTICES[29].tolist() == [10500, 6800]
+    assert PITCH_VERTICES[13].tolist() == [5250, 0]
+    assert PITCH_VERTICES[9].tolist() == [1650, 1384]
+    assert PITCH_VERTICES[21].tolist() == [9400, 3400]
 
 
 def _prediction(
@@ -195,7 +207,7 @@ def test_pitch_polygon_tracks_camera_translation_and_clips_to_frame() -> None:
     polygon = _pitch_polygon(h, 100, 100)
     assert polygon is not None
     assert np.min(polygon, axis=0).tolist() == [10., 10.]
-    assert np.max(polygon, axis=0).tolist() == [100., 80.]
+    assert np.max(polygon, axis=0).tolist() == [100., 78.]
     moved = h.copy()
     moved[1, 2] = -2000.
     assert np.min(_pitch_polygon(moved, 100, 100), axis=0).tolist() == [10., 20.]
