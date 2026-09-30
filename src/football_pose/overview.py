@@ -10,6 +10,7 @@ import uuid
 
 MODEL_LABELS = {
     "yolo-pose": "YOLO",
+    "yolo26-pose": "YOLO26",
     "openpose-body25": "OpenPose",
     "hrnet-w32": "HRNet",
 }

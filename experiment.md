@@ -2,6 +2,16 @@
 
 ## COCO model setup validation
 
+The completed first COCO run used YOLOv8x Pose and OpenPose BODY_25. The next
+model setup check uses the official COCO-pretrained YOLO26x Pose checkpoint in
+`configs/lyra-coco-yolo26.yaml`. It runs at 640 pixels with the YOLO26
+`nms=False` head to match the published 71.6% COCO keypoint AP protocol. A
+separate image pinned to Ultralytics 8.4.164 and a distinct model ID preserve
+the earlier YOLOv8 result. The first football full-frame YOLO26 configuration
+is `configs/lyra-yolo26-full-frame.yaml`; it uses the same checkpoint and
+inference head at the experiment's 1920 input size. New processing comparisons
+should use this versioned configuration as their baseline.
+
 Before interpreting football results, evaluate the existing YOLO Pose and
 OpenPose runners on COCO person keypoints val2017. This is a separate benchmark
 path: original images → existing model containers → canonical COCO-17 predictions
@@ -36,6 +46,7 @@ configuration files remain in the home-directory repository.
 
 Evaluator: [official COCO API](https://github.com/cocodataset/cocoapi).
 Model reference: [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8/).
+YOLO26 reference: [Ultralytics pose documentation](https://docs.ultralytics.com/tasks/pose/).
 
 ## Objective
 

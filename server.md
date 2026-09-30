@@ -7,6 +7,73 @@ filtering, no preprocessing and no video rendering. The initial configuration
 tests YOLO Pose and OpenPose serially. HRNet is not included until we fix its
 person-detector/box protocol and reference checkpoint.
 
+### Test YOLO26 Pose against the completed YOLOv8 result
+
+The earlier COCO run used `yolov8x-pose.pt`. To test the newer COCO-pretrained
+YOLO26x Pose model, pull the current branch and use
+`configs/lyra-coco-yolo26.yaml`. It stores results in the same mounted results
+root with a distinct `yolo26-pose` model ID and a new timestamped run directory.
+The COCO dataset and cached original images are reused.
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+
+docker image ls vincent/football-pose-yolo:dev
+docker build -f containers/Dockerfile.yolo26 \
+  -t vincent/football-pose-yolo26:dev .
+docker run --rm --entrypoint python3 \
+  vincent/football-pose-yolo26:dev \
+  -c 'import ultralytics; print(ultralytics.__version__)'
+```
+
+The base YOLO image must exist before this build. The new image reuses its
+large dependency layers, updates Ultralytics, and must print `8.4.164`.
+
+Download the official checkpoint into the private checkpoint directory (a
+tracked YAML file points to this exact path):
+
+```bash
+mkdir -p /home/vincent/football-pose-private/checkpoints
+curl -fL --retry 3 -C - \
+  -o /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt \
+  https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x-pose.pt
+sha256sum /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
+
+docker run --rm --entrypoint python3 \
+  --volume /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt:/tmp/yolo26x-pose.pt:ro \
+  vincent/football-pose-yolo26:dev \
+  -c 'from ultralytics import YOLO; m = YOLO("/tmp/yolo26x-pose.pt"); print(m.task, m.model.model[-1].kpt_shape)'
+```
+
+The checkpoint check should print `pose (17, 3)` (or the equivalent list). Check
+current GPU availability before starting. The tracked config requests physical
+GPU 0; if another GPU is free, copy the YAML to your private configs directory
+and change `devices: [0]` there. Export the same physical GPU ID in that shell.
+
+```bash
+nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
+export CUDA_VISIBLE_DEVICES=0
+python -m football_pose evaluate-coco configs/lyra-coco-yolo26.yaml --limit 50
+python -m football_pose evaluate-coco configs/lyra-coco-yolo26.yaml
+```
+
+Run these inside tmux if you may disconnect. The full run writes its own
+`model-00/coco-evaluation.txt`, `coco-predictions.json`, and `summary.json` under
+`/mnt/storage2/vincent/football-pose/results/coco-keypoints/<run-id>/`. The
+official YOLO26x Pose reference is 71.6% COCO keypoint AP at 640 pixels using
+its `nms=False` head. This config requests that head with `--nms-free` and saves
+the exact checkpoint hash and inference arguments for your comparison.
+
+For the football video after checking the COCO output, use the separate
+`configs/lyra-yolo26-full-frame.yaml`. It uses the same checkpoint and YOLO26
+container at 1920 input size, includes the pitch filter and annotated video,
+and writes results to the mounted storage. It currently selects GPU 0 for both
+pitch processing and pose inference; change both device settings if your GPU
+reservation changes.
+
 After these code changes have been pushed, update the server clone with
 `git pull --ff-only`. Existing model containers can be reused: the container
 wrapper mounts the current repository and runs its runner scripts.
@@ -116,7 +183,7 @@ a comparable benchmark. `success` means execution succeeded, **not** that a
 reference accuracy was matched. Supply the reference split, checkpoint,
 inference settings, score source and desired tolerance before judging agreement.
 
-The initial YOLO settings are 640 pixels, confidence 0.001, NMS IoU 0.7; OpenPose
+The initial YOLOv8 settings are 640 pixels, confidence 0.001, NMS IoU 0.7; OpenPose
 is BODY_25, single scale, net resolution -1x368, mapped to COCO-17. These are
 explicit benchmark settings, not changes to the football experiment configs.
 Do not compare BODY_25 single-scale results against a COCO-18 or multiscale

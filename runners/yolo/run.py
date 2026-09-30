@@ -56,6 +56,10 @@ def main() -> None:
         help="Minimum person detection confidence.",
     )
     parser.add_argument("--iou", type=float, default=0.7)
+    parser.add_argument(
+        "--nms-free", action="store_true",
+        help="Use the YOLO26 one-to-one pose head without NMS (official COCO benchmark mode).",
+    )
     namespace = parser.parse_args()
     args = contract_args(namespace)
     if args.checkpoint is None:
@@ -76,14 +80,16 @@ def main() -> None:
     with args.output_jsonl.open("w", encoding="utf-8") as output:
         for packet_batch in batches(packets, args.batch_size):
             start = time.perf_counter()
-            results = model(
-                [packet.image for packet in packet_batch],
-                verbose=False,
-                device=device,
-                imgsz=_batch_image_size(packet_batch, image_size),
-                conf=namespace.confidence,
-                iou=namespace.iou,
-            )
+            predict_options = {
+                "verbose": False,
+                "device": device,
+                "imgsz": _batch_image_size(packet_batch, image_size),
+                "conf": namespace.confidence,
+                "iou": namespace.iou,
+            }
+            if namespace.nms_free:
+                predict_options["nms"] = False
+            results = model([packet.image for packet in packet_batch], **predict_options)
             elapsed_ms = (time.perf_counter() - start) * 1000 / len(packet_batch)
             for packet, result in zip(packet_batch, results, strict=True):
                 if result.keypoints is None:

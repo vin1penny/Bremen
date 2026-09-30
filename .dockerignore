@@ -1,0 +1,9 @@
+*
+!requirements
+!requirements/**
+!src
+!src/**
+!runners
+!runners/**
+**/__pycache__/**
+**/*.pyc

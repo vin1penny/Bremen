@@ -1,0 +1,51 @@
+name: lyra-native-yolo26-full-frame-baseline
+input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
+output_dir: /mnt/storage2/vincent/football-pose/results/football/yolo26-full-frame
+
+video_output:
+  enabled: true
+  root: /mnt/storage2/vincent/football-pose/videos/output
+
+pitch_filter:
+  enabled: true
+  checkpoint: /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
+  cache_root: /home/vincent/football-pose-cache/pitch
+  device: "0"
+  image_size: 1280
+  batch_size: 16
+  detection_confidence: 0.25
+  landmark_confidence: 0.5
+  minimum_landmarks: 4
+  ransac_threshold_cm: 150.0
+  minimum_inlier_ratio: 0.6
+  maximum_median_reprojection_cm: 200.0
+  max_fallback_frames: 0
+  pitch_margin_cm: 50.0
+  pitch_bbox_margin_px: 10.0
+  ankle_confidence: 0.2
+  deduplication_iou: 0.5
+
+processors: []
+
+cache:
+  root: /home/vincent/football-pose-cache/artifacts
+  format: ffv1
+  shard_size: 256
+  pin: true
+
+models:
+  - id: yolo26-pose
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-yolo26:dev
+      - --imgsz
+      - "1920"
+      - --confidence
+      - "0.25"
+      - --nms-free
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
+    batch_size: 8
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 3600

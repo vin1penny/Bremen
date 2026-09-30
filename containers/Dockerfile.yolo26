@@ -1,0 +1,8 @@
+FROM vincent/football-pose-yolo:dev
+
+WORKDIR /workspace
+COPY requirements/yolo26.txt requirements/yolo26.txt
+RUN python3 -m pip install --no-cache-dir -r requirements/yolo26.txt
+COPY src src
+COPY runners/yolo runners/yolo
+ENTRYPOINT ["python3", "runners/yolo/run.py"]
