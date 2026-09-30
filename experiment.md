@@ -1,5 +1,39 @@
 # Master thesis experiment
 
+## COCO model setup validation
+
+Before interpreting football results, evaluate the existing YOLO Pose and
+OpenPose runners on COCO person keypoints val2017. This is a separate benchmark
+path: original images → existing model containers → canonical COCO-17 predictions
+→ official `pycocotools` OKS evaluation. No pitch filtering, tracking, cropping,
+or image enhancement is applied. Original image IDs/sizes are retained, and
+images with zero predictions remain in the evaluation denominator.
+
+`evaluate-coco configs/lyra-coco-keypoints.yaml --limit 50` is a deterministic
+smoke test (first 50 image IDs); omit `--limit` for the full supplied annotation
+set. Outputs include AP/AP50/AP75, medium/large AP and corresponding AR,
+raw detections, checkpoint and dataset hashes, settings, image IDs and logs.
+Scores use 0–1, with -1 indicating an unavailable size/category result.
+COCO evaluation uses the official keypoint sigmas and maxDets=20.
+
+YOLO uses its box confidence for person ranking; OpenPose uses `poseScores`
+and the existing BODY_25 → COCO-17 mapping. Canonical records now optionally
+retain `person_score`; COCO evaluation requires it rather than inventing scores.
+The initial comparison is YOLO 640/confidence 0.001/IoU 0.7 and OpenPose
+single-scale -1x368. These must be aligned with each reference's exact protocol
+before asserting that accuracy matches. HRNet remains pending an explicit
+detector/box protocol (ground-truth boxes and detected boxes are not equivalent).
+
+Execution success is not an accuracy pass. A reference score, split, checkpoint,
+input size, augmentation/NMS protocol and tolerance are needed for that decision.
+Published results can use a different validation implementation from our shared
+COCO evaluator. Keep the full benchmark distinct from football robustness tests.
+Implementation: `src/football_pose/coco_evaluation.py`; server instructions and
+download commands: `server.md`, “COCO keypoints setup check”.
+
+Evaluator: [official COCO API](https://github.com/cocodataset/cocoapi).
+Model reference: [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8/).
+
 ## Objective
 
 Find the preprocessing pipeline that produces the best human-pose estimates from

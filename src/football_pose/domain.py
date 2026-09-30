@@ -103,6 +103,7 @@ class PredictionRecord(BaseModel):
     crop_id: str | None = None
     track_id: str | None = None
     person_id: str
+    person_score: float | None = Field(default=None, ge=0.0, le=1.0)
     source_bbox: tuple[float, float, float, float] | None = None
     keypoints: list[Keypoint]
     coordinate_space: Literal["original_frame"] = "original_frame"

@@ -28,6 +28,7 @@ def main() -> None:
                 crop_id=packet.crop_id,
                 track_id=packet.track_id,
                 person_id=packet.track_id or "mock-0",
+                person_score=1.0,
                 source_bbox=packet.source_bbox,
                 keypoints=keypoints,
                 inference_time_ms=0.0,

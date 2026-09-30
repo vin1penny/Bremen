@@ -55,6 +55,7 @@ def main() -> None:
         default=0.25,
         help="Minimum person detection confidence.",
     )
+    parser.add_argument("--iou", type=float, default=0.7)
     namespace = parser.parse_args()
     args = contract_args(namespace)
     if args.checkpoint is None:
@@ -81,6 +82,7 @@ def main() -> None:
                 device=device,
                 imgsz=_batch_image_size(packet_batch, image_size),
                 conf=namespace.confidence,
+                iou=namespace.iou,
             )
             elapsed_ms = (time.perf_counter() - start) * 1000 / len(packet_batch)
             for packet, result in zip(packet_batch, results, strict=True):
@@ -112,6 +114,7 @@ def main() -> None:
                         crop_id=packet.crop_id,
                         track_id=packet.track_id,
                         person_id=packet.track_id or f"yolo-{person_index}",
+                        person_score=float(result.boxes.conf[person_index].item()),
                         source_bbox=bbox_to_source(packet, bbox),
                         keypoints=canonical_keypoints(packet, xy, scores),
                         inference_time_ms=elapsed_ms,

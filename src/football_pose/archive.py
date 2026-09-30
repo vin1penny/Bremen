@@ -32,6 +32,7 @@ PREDICTION_SCHEMA = pa.schema(
         pa.field("crop_id", pa.string(), nullable=True),
         pa.field("track_id", pa.string(), nullable=True),
         pa.field("person_id", pa.string(), nullable=False),
+        pa.field("person_score", pa.float64(), nullable=True),
         # Pydantic enforces four values. Arrow's nullable fixed-size-list reader
         # rejects null values in some releases, so keep the storage list variable.
         pa.field("source_bbox", pa.list_(pa.float64()), nullable=True),

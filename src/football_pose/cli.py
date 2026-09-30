@@ -15,6 +15,22 @@ from football_pose.preprocessing import REGISTRY
 app = typer.Typer(no_args_is_help=True, help="Run modular football pose experiments.")
 
 
+@app.command("evaluate-coco")
+def evaluate_coco(
+    config: Path,
+    limit: int | None = typer.Option(None, min=1, help="Smoke subset, not a benchmark score."),
+    models: list[str] | None = typer.Option(None, "--model"),
+) -> None:
+    from football_pose.coco_evaluation import run_coco
+
+    path = run_coco(config, limit=limit, models=models)
+    typer.echo(f"Summary: {path}")
+    report = json.loads(path.read_text())
+    typer.echo(json.dumps(report, indent=2))
+    if not report["success"]:
+        raise typer.Exit(1)
+
+
 @app.command("validate-config")
 def validate_config(
     config: Path,

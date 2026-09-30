@@ -1,5 +1,89 @@
 # Lyra server runbook
 
+## COCO keypoints setup check (2026-09-30)
+
+This is separate from the football experiments: original COCO images, no pitch
+filtering, no preprocessing and no video rendering. The initial configuration
+tests YOLO Pose and OpenPose serially. HRNet is not included until we fix its
+person-detector/box protocol and reference checkpoint.
+
+After these code changes have been pushed, update the server clone with
+`git pull --ff-only`. Existing model containers can be reused: the container
+wrapper mounts the current repository and runs its runner scripts.
+
+Start or attach tmux **on Lyra**, then run the following inside its shell:
+
+```bash
+tmux new -s coco-evaluation
+```
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+python -m pip install -r requirements/evaluation.txt
+python -m pytest -q
+df -h /home/vincent
+```
+
+COCO validation requires the **val2017 images** and
+`annotations/person_keypoints_val2017.json`, not the instances annotations.
+If already downloaded, set `images` and `annotations` in
+`configs/lyra-coco-keypoints.yaml` to their locations. Otherwise download from the
+[official COCO distribution](https://cocodataset.org/#download):
+
+```bash
+mkdir -p /home/vincent/football-pose-private/datasets/coco
+cd /home/vincent/football-pose-private/datasets/coco
+curl -fL --retry 3 -C - -o val2017.zip http://images.cocodataset.org/zips/val2017.zip
+curl -fL --retry 3 -C - -o annotations_trainval2017.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+unzip -n val2017.zip
+unzip -n annotations_trainval2017.zip
+```
+
+Check available disk space first; allow several GB for archives, extracted
+images and a separate lossless PNG evaluation cache. No training images are
+needed. Do not place this dataset in the video-only mounted-storage folders
+without agreeing that additional storage use.
+
+Check availability/reservation according to the shared-server policy. GPU 7 is
+only a default, not a permanent reservation. If selecting another GPU, change
+both model `devices` entries in the COCO YAML and the export below.
+
+```bash
+cd /home/vincent/projects/Bremen
+nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
+export CUDA_VISIBLE_DEVICES=7
+python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml --limit 50
+```
+
+Check that both jobs report `COMPLETE`, then run the full validation set:
+
+```bash
+python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml
+```
+
+Use `--model yolo-pose` or `--model openpose-body25` to run one model. Detach with
+Ctrl+B, then D; reconnect with `tmux attach -t coco-evaluation`.
+
+Each invocation prints and saves a new timestamped `summary.json` under
+`/home/vincent/football-pose-results/coco-keypoints/`. Read a specific summary
+with `cat` or download it with `scp vincent@lyra:ABSOLUTE_SUMMARY_PATH ~/Downloads/`
+from your Mac. Each model directory also contains `coco-predictions.json`, the
+official evaluator's `coco-evaluation.txt`, canonical JSONL and runner logs.
+
+Metrics use 0–1 (multiply by 100 for percentage points); -1 means no evaluable
+ground truth in that category/size bin. A 50-image result is a smoke test, not
+a comparable benchmark. `success` means execution succeeded, **not** that a
+reference accuracy was matched. Supply the reference split, checkpoint,
+inference settings, score source and desired tolerance before judging agreement.
+
+The initial YOLO settings are 640 pixels, confidence 0.001, NMS IoU 0.7; OpenPose
+is BODY_25, single scale, net resolution -1x368, mapped to COCO-17. These are
+explicit benchmark settings, not changes to the football experiment configs.
+Do not compare BODY_25 single-scale results against a COCO-18 or multiscale
+reference. Native model person scores are retained for COCO ranking.
+
 ## Weserstadion calibration and pitch training (2026-09-25)
 
 Pitch coordinates are now hard-coded for **Weserstadion, Bremen: 105 × 68 m**.
