@@ -30,6 +30,9 @@ Published results can use a different validation implementation from our shared
 COCO evaluator. Keep the full benchmark distinct from football robustness tests.
 Implementation: `src/football_pose/coco_evaluation.py`; server instructions and
 download commands: `server.md`, “COCO keypoints setup check”.
+The downloaded dataset, lossless artifact cache, raw predictions, and results
+live under `/mnt/storage2/vincent/football-pose/`; only code and small
+configuration files remain in the home-directory repository.
 
 Evaluator: [official COCO API](https://github.com/cocodataset/cocoapi).
 Model reference: [Ultralytics YOLOv8](https://docs.ultralytics.com/models/yolov8/).

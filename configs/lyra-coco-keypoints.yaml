@@ -1,8 +1,8 @@
 # Dedicated benchmark: no football preprocessing, tracking or pitch filtering.
-annotations: /home/vincent/football-pose-private/datasets/coco/annotations/person_keypoints_val2017.json
-images: /home/vincent/football-pose-private/datasets/coco/val2017
-output_dir: /home/vincent/football-pose-results/coco-keypoints
-cache_root: /home/vincent/football-pose-cache/coco
+annotations: /mnt/storage2/vincent/football-pose/datasets/coco/annotations/person_keypoints_val2017.json
+images: /mnt/storage2/vincent/football-pose/datasets/coco/val2017
+output_dir: /mnt/storage2/vincent/football-pose/results/coco-keypoints
+cache_root: /mnt/storage2/vincent/football-pose/cache/coco
 models:
   - id: yolo-pose
     command: [bash, runners/container-runner.sh, 'vincent/football-pose-yolo:dev', --imgsz, '640', --confidence, '0.001', --iou, '0.7']

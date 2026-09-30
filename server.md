@@ -28,23 +28,50 @@ df -h /home/vincent
 
 COCO validation requires the **val2017 images** and
 `annotations/person_keypoints_val2017.json`, not the instances annotations.
-If already downloaded, set `images` and `annotations` in
-`configs/lyra-coco-keypoints.yaml` to their locations. Otherwise download from the
-[official COCO distribution](https://cocodataset.org/#download):
+The archives, extracted dataset, lossless image cache, raw predictions, and
+evaluation results are all large or potentially large, so they belong on the
+mounted storage—not under `/home/vincent`. The tracked configuration uses:
+
+| Content | Mounted path |
+| --- | --- |
+| Downloaded and extracted dataset | `/mnt/storage2/vincent/football-pose/datasets/coco` |
+| Lossless evaluation artifact cache | `/mnt/storage2/vincent/football-pose/cache/coco` |
+| Predictions, logs, and summaries | `/mnt/storage2/vincent/football-pose/results/coco-keypoints` |
+
+Create and verify all three locations before downloading:
 
 ```bash
-mkdir -p /home/vincent/football-pose-private/datasets/coco
-cd /home/vincent/football-pose-private/datasets/coco
-curl -fL --retry 3 -C - -o val2017.zip http://images.cocodataset.org/zips/val2017.zip
-curl -fL --retry 3 -C - -o annotations_trainval2017.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
-unzip -n val2017.zip
-unzip -n annotations_trainval2017.zip
+mkdir -p \
+  /mnt/storage2/vincent/football-pose/datasets/coco \
+  /mnt/storage2/vincent/football-pose/cache/coco \
+  /mnt/storage2/vincent/football-pose/results/coco-keypoints
+
+test -w /mnt/storage2/vincent/football-pose/datasets/coco \
+  && echo "COCO dataset directory is writable"
+test -w /mnt/storage2/vincent/football-pose/cache/coco \
+  && echo "COCO cache directory is writable"
+test -w /mnt/storage2/vincent/football-pose/results/coco-keypoints \
+  && echo "COCO results directory is writable"
+df -hT /mnt/storage2
 ```
 
-Check available disk space first; allow several GB for archives, extracted
-images and a separate lossless PNG evaluation cache. No training images are
-needed. Do not place this dataset in the video-only mounted-storage folders
-without agreeing that additional storage use.
+If the dataset is not already present, download it directly onto the mount from
+the [official COCO distribution](https://cocodataset.org/#download):
+
+```bash
+cd /mnt/storage2/vincent/football-pose/datasets/coco
+curl -fL --retry 3 -C - -o val2017.zip https://images.cocodataset.org/zips/val2017.zip
+curl -fL --retry 3 -C - -o annotations_trainval2017.zip https://images.cocodataset.org/annotations/annotations_trainval2017.zip
+unzip -n val2017.zip
+unzip -n annotations_trainval2017.zip
+
+test -f annotations/person_keypoints_val2017.json \
+  && echo "COCO keypoint annotations found"
+find val2017 -maxdepth 1 -type f -name '*.jpg' | wc -l
+```
+
+The final count must be 5,000 images. Keep both the dataset itself and the
+generated PNG artifact cache on the mount. No COCO training images are needed.
 
 Check availability/reservation according to the shared-server policy. GPU 7 is
 only a default, not a permanent reservation. If selecting another GPU, change
@@ -67,7 +94,7 @@ Use `--model yolo-pose` or `--model openpose-body25` to run one model. Detach wi
 Ctrl+B, then D; reconnect with `tmux attach -t coco-evaluation`.
 
 Each invocation prints and saves a new timestamped `summary.json` under
-`/home/vincent/football-pose-results/coco-keypoints/`. Read a specific summary
+`/mnt/storage2/vincent/football-pose/results/coco-keypoints/`. Read a specific summary
 with `cat` or download it with `scp vincent@lyra:ABSOLUTE_SUMMARY_PATH ~/Downloads/`
 from your Mac. Each model directory also contains `coco-predictions.json`, the
 official evaluator's `coco-evaluation.txt`, canonical JSONL and runner logs.
