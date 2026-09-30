@@ -60,8 +60,15 @@ the [official COCO distribution](https://cocodataset.org/#download):
 
 ```bash
 cd /mnt/storage2/vincent/football-pose/datasets/coco
-curl -fL --retry 3 -C - -o val2017.zip https://images.cocodataset.org/zips/val2017.zip
-curl -fL --retry 3 -C - -o annotations_trainval2017.zip https://images.cocodataset.org/annotations/annotations_trainval2017.zip
+curl -fL --retry 3 -C - -o val2017.zip http://images.cocodataset.org/zips/val2017.zip
+curl -fL --retry 3 -C - -o annotations_trainval2017.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+
+# Verify the upstream archives after using the HTTP endpoint. Do not use curl -k.
+printf '%s  %s\n' \
+  '442b8da7639aecaf257c1dceb8ba8c80' 'val2017.zip' \
+  'f4bbac642086de4f52a3fdda2de5fa2c' 'annotations_trainval2017.zip' \
+  | md5sum --check -
+
 unzip -n val2017.zip
 unzip -n annotations_trainval2017.zip
 
@@ -72,6 +79,10 @@ find val2017 -maxdepth 1 -type f -name '*.jpg' | wc -l
 
 The final count must be 5,000 images. Keep both the dataset itself and the
 generated PNG artifact cache on the mount. No COCO training images are needed.
+The COCO file host may present a mismatched certificate over HTTPS on Lyra, so
+the commands use its established HTTP endpoint and then verify both downloaded
+archives against their published MD5 checksums. Type or paste raw URLs in a
+shell—never the Markdown form `[URL](URL)`.
 
 Check availability/reservation according to the shared-server policy. GPU 7 is
 only a default, not a permanent reservation. If selecting another GPU, change
