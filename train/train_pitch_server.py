@@ -1,4 +1,4 @@
-"""Train the 32-landmark pitch detector on Lyra with a YOLO26 Pose backbone."""
+"""Train the separate 32-landmark pitch detector on Lyra."""
 from __future__ import annotations
 
 import argparse
@@ -14,8 +14,8 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--imgsz", type=int, default=1280)
-    parser.add_argument("--model", default="yolo26n-pose.pt")
-    parser.add_argument("--name", default="pitch-yolo26-production")
+    parser.add_argument("--model", default="yolov8n-pose.pt")
+    parser.add_argument("--name", default="pitch-production")
     args = parser.parse_args()
     import yaml
     from ultralytics import YOLO

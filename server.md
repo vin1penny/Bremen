@@ -48,33 +48,18 @@ done
 
 Do not start the full loop until the baseline's YOLO26 result and video look
 reasonable. Detach tmux with Ctrl+B then D, and reattach with
-`tmux attach -t yolo26-football`. The new runs still use the existing
-YOLOv8-trained **pitch landmark** checkpoint for geometry; YOLO26 Pose replaces
-the person-pose model, not those auxiliary weights. To make *every* YOLO
-component YOLO26, retrain the 32-keypoint pitch model and the optional player
-crop detector, validate their results, and then update their checkpoint paths.
-Changing an old checkpoint filename does not convert its architecture.
+`tmux attach -t yolo26-football`. The new runs deliberately keep the accepted
+YOLOv8-trained **pitch landmark** checkpoint for geometry. YOLO26 replaces the
+compared person-pose model only. Do **not** retrain or swap the pitch checkpoint
+for this migration: keeping its hash and settings fixed makes the model and
+preprocessing comparisons interpretable.
 
-For the pitch retraining path, install the pinned host detector dependency and
-run this in a separate tmux session after checking GPU availability. Keep the
-dataset on mounted storage if transferring or re-extracting it; point `--data`
-to its actual `data.yaml` path. The new run name avoids overwriting the YOLOv8
-pitch checkpoint.
+The optional learned-crop detector is separate from pitch localization. If you
+want a YOLO26 detector for that optional step, install the pinned host
+dependency and train against the appropriate detection dataset:
 
 ```bash
 python -m pip install -r requirements/detection.txt
-CUDA_VISIBLE_DEVICES=0 python train/train_pitch_server.py \
-  --data /mnt/storage2/vincent/football-pose/datasets/football-field-detection-15/data.yaml \
-  --project /mnt/storage2/vincent/football-pose/models/pitch-training \
-  --imgsz 1280 --epochs 100 --batch 8
-```
-
-The trained checkpoint path and hash appear in `pitch-validation.json`.
-Check landmark overlays and usable geometry on the football video before
-substituting it into `pitch_filter.checkpoint`. For the optional learned-crop
-detector, use its own detection dataset and training entry point:
-
-```bash
 CUDA_VISIBLE_DEVICES=0 python train/train_player_server.py \
   --data /mnt/storage2/vincent/football-pose/datasets/football-players-detection-20/data.yaml \
   --project /mnt/storage2/vincent/football-pose/models/player-training \
@@ -85,8 +70,8 @@ The player dataset path is an example: verify the exported dataset and
 `data.yaml` exist there first. The resulting `player-validation.json` gives the
 checkpoint hash, box metrics, and class names. Validate actual football-video
 crops and the `class_ids` in `configs/server-three-models.yaml` before enabling
-the `crop` processor. No newly trained YOLO26 pitch/player weights exist merely
-because these training scripts and paths are configured.
+the `crop` processor. This player-detector training is optional; it does not
+change the accepted YOLOv8 pitch checkpoint.
 
 ## COCO keypoints setup check (2026-09-30)
 

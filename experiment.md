@@ -11,13 +11,13 @@ uses it too. New football outputs have separate `yolo26-*` directories on the
 mounted storage, preserving YOLOv8 pilot results. Compare processing steps
 against the **YOLO26 full-frame baseline**, not an older YOLOv8 run.
 
-The current pitch-landmark checkpoint was trained with YOLOv8n Pose. It is an
-auxiliary geometry model, not the person-pose model, and cannot be relabelled
-YOLO26. `train/train_pitch_server.py` now defaults to a YOLO26 Pose backbone;
-adopt its new checkpoint only after validating landmarks and pitch coverage.
-Learned cropping likewise needs a newly trained YOLO26 detection checkpoint.
-Until those weights are trained and adopted, *every YOLO component is YOLO26*
-would be an inaccurate claim. OpenPose and HRNet are independent model families.
+The pitch-landmark model deliberately keeps its validated YOLOv8n Pose weights.
+It is an auxiliary geometry model, not one of the compared person-pose models.
+It runs on the original video frames under the same checkpoint and settings for
+every compared pose model and preprocessing condition. There is **no need to
+retrain the pitch model** for the YOLO26 person-pose migration. Learned cropping
+is separate again: it needs a validated player-detector checkpoint before use.
+OpenPose and HRNet remain independent model families.
 The pitch-weight comparison YAML files remain historical checks of earlier weights.
 
 ## COCO model setup validation
@@ -127,11 +127,11 @@ Each frame now archives landmark IDs, pixel coordinates and confidence values.
 Magenta P0–P31 labels show predictions with confidence ≥0.5 independently of fit
 acceptance; the cyan polygon shows the fitted outer boundary.
 
-The earlier pitch training followed `train/train_remote.ipynb` with a YOLOv8
-backbone. The current server entry point, `train/train_pitch_server.py`, defaults
-to YOLO26n Pose and a separate `pitch-yolo26-production` run directory. Use the
-version-15 dataset and preserve the checkpoint hash and `pitch-validation.json`;
-rerunning with the same name can overwrite that new run directory. Select using the
+Pitch training followed `train/train_remote.ipynb` with a YOLOv8 backbone.
+`train/train_pitch_server.py` retains that backbone as its default if pitch
+training is ever repeated. The accepted checkpoint stays fixed during the
+YOLO26 person-pose comparisons. Preserve its hash and `pitch-validation.json`;
+rerunning with the same name can overwrite a training run directory. Select using the
 saved checkpoint's pose validation metrics; box accuracy is not the selection
 criterion. Inspect the new checkpoint on the video before making its versioned
 path the production checkpoint. Training and evaluation splits must remain separate.
