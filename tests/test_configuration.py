@@ -68,9 +68,11 @@ def test_lyra_yolo_smoke_config_is_scoped_to_one_model_and_gpu() -> None:
     )
 
     assert [processor.type for processor in loaded.processors] == ["resize", "clahe"]
-    assert [model.id for model in loaded.models] == ["yolo-pose"]
+    assert [model.id for model in loaded.models] == ["yolo26-pose"]
     assert loaded.models[0].devices == [0]
-    assert loaded.models[0].command[-1] == "vincent/football-pose-yolo:dev"
+    assert "vincent/football-pose-yolo26:dev" in loaded.models[0].command
+    assert "--nms-free" in loaded.models[0].command
+    assert loaded.models[0].checkpoint.name == "yolo26x-pose.pt"
 
 
 def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> None:
@@ -89,7 +91,9 @@ def test_full_frame_and_tiled_yolo_configs_hold_model_settings_constant() -> Non
         "overlap_ratio": 0.1,
     }
     assert full_frame.models == tiled.models
-    assert full_frame.models[0].devices == [7]
+    assert full_frame.models[0].devices == [0]
+    assert full_frame.models[0].id == "yolo26-pose"
+    assert "--nms-free" in full_frame.models[0].command
     image_size_index = full_frame.models[0].command.index("--imgsz")
     assert full_frame.models[0].command[image_size_index + 1] == "1920"
 
@@ -143,8 +147,9 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
     assert [processor.type for processor in loaded.processors] == [processor_type]
     assert loaded.processors[0].params == params
     assert loaded.models == reference.models
-    assert [model.id for model in loaded.models] == ["yolo-pose", "openpose-body25"]
-    assert all(model.devices == [7] for model in loaded.models)
+    assert [model.id for model in loaded.models] == ["yolo26-pose", "openpose-body25"]
+    assert all(model.devices == [0] for model in loaded.models)
+    assert "--nms-free" in loaded.models[0].command
     image_size_index = loaded.models[0].command.index("--imgsz")
     assert loaded.models[0].command[image_size_index + 1] == "1920"
     assert loaded.models[1].command[-1] == "--net-resolution=1920x1088"

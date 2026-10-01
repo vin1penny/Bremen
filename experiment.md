@@ -1,5 +1,25 @@
 # Master thesis experiment
 
+## Current YOLO26 Pose protocol (2026-10-01)
+
+YOLO26x Pose is the active YOLO pose model for the **whole thesis pipeline**, not
+just COCO. Full-frame, deterministic-tiling, CLAHE, gamma, unsharp, and one-GPU
+smoke configurations all use `yolo26x-pose.pt`, the
+`vincent/football-pose-yolo26:dev` container, `yolo26-pose` as the model ID,
+and the native `--nms-free` inference head. The combined COCO/OpenPose check
+uses it too. New football outputs have separate `yolo26-*` directories on the
+mounted storage, preserving YOLOv8 pilot results. Compare processing steps
+against the **YOLO26 full-frame baseline**, not an older YOLOv8 run.
+
+The current pitch-landmark checkpoint was trained with YOLOv8n Pose. It is an
+auxiliary geometry model, not the person-pose model, and cannot be relabelled
+YOLO26. `train/train_pitch_server.py` now defaults to a YOLO26 Pose backbone;
+adopt its new checkpoint only after validating landmarks and pitch coverage.
+Learned cropping likewise needs a newly trained YOLO26 detection checkpoint.
+Until those weights are trained and adopted, *every YOLO component is YOLO26*
+would be an inaccurate claim. OpenPose and HRNet are independent model families.
+The pitch-weight comparison YAML files remain historical checks of earlier weights.
+
 ## COCO model setup validation
 
 The completed first COCO run used YOLOv8x Pose and OpenPose BODY_25. The next
@@ -7,10 +27,9 @@ model setup check uses the official COCO-pretrained YOLO26x Pose checkpoint in
 `configs/lyra-coco-yolo26.yaml`. It runs at 640 pixels with the YOLO26
 `nms=False` head to match the published 71.6% COCO keypoint AP protocol. A
 separate image pinned to Ultralytics 8.4.164 and a distinct model ID preserve
-the earlier YOLOv8 result. The first football full-frame YOLO26 configuration
-is `configs/lyra-yolo26-full-frame.yaml`; it uses the same checkpoint and
-inference head at the experiment's 1920 input size. New processing comparisons
-should use this versioned configuration as their baseline.
+the earlier YOLOv8 result. The full-frame YOLO26 configuration is
+`configs/lyra-yolo26-full-frame.yaml`; `configs/lyra-yolo-full-frame.yaml` is an
+equivalent entry point. Both use the same checkpoint and inference head at 1920.
 
 Before interpreting football results, evaluate the existing YOLO Pose and
 OpenPose runners on COCO person keypoints val2017. This is a separate benchmark
@@ -61,7 +80,7 @@ benefit.
 video
   -> ordered preprocessing configuration
   -> lossless, content-addressed artifact
-  -> YOLO Pose / HRNet-W32 / OpenPose
+  -> YOLO26 Pose / HRNet-W32 / OpenPose
   -> common COCO-17 records in original-frame coordinates
   -> cross-tile duplicate removal and pitch-region classification
   -> raw records + on-pitch records + auditable decisions
@@ -82,7 +101,7 @@ as pilot results and are not mixed with the main full-resolution comparisons.
 
 ## Models
 
-- **YOLO Pose:** official pretrained checkpoint; supports multi-person input.
+- **YOLO26 Pose:** official COCO-pretrained checkpoint; supports multi-person input.
 - **HRNet-W32:** official pretrained top-down checkpoint; requires one person crop.
 - **OpenPose BODY_25:** official pretrained checkpoint; BODY_25 output is mapped to
   COCO-17.
@@ -108,14 +127,15 @@ Each frame now archives landmark IDs, pixel coordinates and confidence values.
 Magenta P0–P31 labels show predictions with confidence ≥0.5 independently of fit
 acceptance; the cyan polygon shows the fitted outer boundary.
 
-Pitch training follows the pitch section of `train/train_remote.ipynb`, available
-as `train/train_pitch_server.py` for tmux. Use the version-15 dataset and preserve
-the checkpoint hash and `pitch-validation.json`; the fixed `pitch-production`
-directory is overwritten by subsequent training runs. Select using the
+The earlier pitch training followed `train/train_remote.ipynb` with a YOLOv8
+backbone. The current server entry point, `train/train_pitch_server.py`, defaults
+to YOLO26n Pose and a separate `pitch-yolo26-production` run directory. Use the
+version-15 dataset and preserve the checkpoint hash and `pitch-validation.json`;
+rerunning with the same name can overwrite that new run directory. Select using the
 saved checkpoint's pose validation metrics; box accuracy is not the selection
 criterion. Inspect the new checkpoint on the video before making its versioned
 path the production checkpoint. Training and evaluation splits must remain separate.
-The high-resolution production candidate selected on 2026-09-25 uses YOLOv8n-pose,
+The historical high-resolution candidate selected on 2026-09-25 uses YOLOv8n-pose,
 1280 pixels, batch 8, 100 epochs, and mosaic disabled. Compare it with the earlier
 640-pixel, batch-2, 50-epoch run, which achieved strong landmark validation. A
 640-pixel, 20-epoch, batch-16 server run produced pose mAP50 0.322 and is rejected.

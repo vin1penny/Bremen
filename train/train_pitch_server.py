@@ -1,4 +1,4 @@
-"""Pitch-only equivalent of train_remote.ipynb for a Lyra tmux session."""
+"""Train the 32-landmark pitch detector on Lyra with a YOLO26 Pose backbone."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,8 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--imgsz", type=int, default=1280)
-    parser.add_argument("--name", default="pitch-production")
+    parser.add_argument("--model", default="yolo26n-pose.pt")
+    parser.add_argument("--name", default="pitch-yolo26-production")
     args = parser.parse_args()
     import yaml
     from ultralytics import YOLO
@@ -35,7 +36,9 @@ def main() -> None:
     args.project.mkdir(parents=True, exist_ok=True)
     normalized_data = args.project.resolve() / f"{name}-data.yaml"
     normalized_data.write_text(yaml.safe_dump(config))
-    model = YOLO("yolov8n-pose.pt")
+    model = YOLO(args.model)
+    if model.task != "pose":
+        raise ValueError(f"Expected a pose backbone, got {model.task!r}")
     model.train(data=str(normalized_data), project=str(args.project.resolve()), name=name,
                 epochs=args.epochs, batch=args.batch, imgsz=args.imgsz, mosaic=0.0,
                 device=0, workers=4, seed=0, deterministic=True, exist_ok=True)
@@ -49,7 +52,7 @@ def main() -> None:
         "checkpoint": str(checkpoint),
         "sha256": checkpoint_hash,
         "data": str(data), "epochs": args.epochs, "batch": args.batch,
-        "imgsz": args.imgsz,
+        "imgsz": args.imgsz, "initial_model": args.model,
         "metric": "pose_mAP50-95",
         "pose_mAP50": float(metrics.pose.map50),
         "pose_mAP50-95": float(metrics.pose.map),

@@ -4,16 +4,16 @@ images: /mnt/storage2/vincent/football-pose/datasets/coco/val2017
 output_dir: /mnt/storage2/vincent/football-pose/results/coco-keypoints
 cache_root: /mnt/storage2/vincent/football-pose/cache/coco
 models:
-  - id: yolo-pose
-    command: [bash, runners/container-runner.sh, 'vincent/football-pose-yolo:dev', --imgsz, '640', --confidence, '0.001', --iou, '0.7']
-    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+  - id: yolo26-pose
+    command: [bash, runners/container-runner.sh, 'vincent/football-pose-yolo26:dev', --imgsz, '640', --confidence, '0.001', --iou, '0.7', --nms-free]
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
     batch_size: 8
     min_batch_size: 1
-    devices: [7]
+    devices: [0]
     timeout_seconds: 14400
   - id: openpose-body25
     command: [bash, runners/container-runner.sh, 'vincent/football-pose-openpose:dev', '--net-resolution=-1x368']
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
-    devices: [7]
+    devices: [0]
     timeout_seconds: 14400

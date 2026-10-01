@@ -18,9 +18,9 @@ processors:
       padding_ratio: 0.10
       min_size: 32
       detector:
-        checkpoint: ../models/player.pt
+        checkpoint: ../models/player-yolo26-best.pt
         confidence: 0.30
-        # collab/player.pt: 0=ball, 1=goalkeeper, 2=player, 3=referee
+        # Verify the class IDs in the newly trained detector before running.
         class_ids: [1, 2, 3]
         track: true
 
@@ -36,9 +36,9 @@ cache:
 # listed GPU. Use only the physical IDs reserved in the semaphore document and
 # export the exact same IDs through CUDA_VISIBLE_DEVICES before launching.
 models:
-  - id: yolo-pose
-    command: [bash, runners/container-runner.sh, football-pose-yolo]
-    checkpoint: ../train/yolov8x-pose.pt
+  - id: yolo26-pose
+    command: [bash, runners/container-runner.sh, vincent/football-pose-yolo26:dev, --nms-free]
+    checkpoint: ../models/yolo26x-pose.pt
     batch_size: 64
     min_batch_size: 1
     devices: [0, 1, 2, 3]

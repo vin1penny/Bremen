@@ -1,5 +1,93 @@
 # Lyra server runbook
 
+## YOLO26 across the thesis pipeline (2026-10-01)
+
+YOLO26x Pose is now the active **person-pose** model in the COCO check and all
+tracked Lyra football YOLO configurations: full-frame, tiling, CLAHE, both gamma
+settings, unsharp, and the one-GPU smoke test. The combined preprocessing
+configs still run OpenPose after YOLO26. Old YOLOv8 runs remain in their original
+result directories; new football runs write under
+`/mnt/storage2/vincent/football-pose/results/football/yolo26-*`. Do not compare
+a YOLO26 ablation with the old YOLOv8 baseline. The older instructions below
+describe the earlier setup and are retained as historical context.
+
+On Lyra, pull the latest code and build the YOLO26 container using the commands
+in the next section. Download `yolo26x-pose.pt` to the exact checkpoint path
+shown there. Check GPU availability and reserve one GPU. These tracked YOLO26
+football configs select physical GPU 0 for pose inference; their pitch-filter
+device is also `"0"`. If GPU 0 is unavailable, copy the configs to your private
+directory and change every `models[].devices` entry **and**
+`pitch_filter.device` to the same chosen physical GPU ID. Export that ID through
+`CUDA_VISIBLE_DEVICES` before running. The COCO config has no pitch filter.
+
+```bash
+cd /home/vincent/projects/Bremen
+git pull --ff-only
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=0
+python -m pytest -q
+python -m football_pose validate-config configs/lyra-yolo-full-frame.yaml
+tmux new -A -s yolo26-football
+```
+
+Run the first commands **inside tmux** after it opens. The baseline and tiling
+use the same YOLO26 checkpoint and input size; only the preprocessing differs.
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=0
+python -m football_pose run configs/lyra-yolo-full-frame.yaml
+python -m football_pose run configs/lyra-yolo-tiled.yaml
+for config in configs/lyra-preprocess-*.yaml; do
+  python -m football_pose run "$config"
+done
+```
+
+Do not start the full loop until the baseline's YOLO26 result and video look
+reasonable. Detach tmux with Ctrl+B then D, and reattach with
+`tmux attach -t yolo26-football`. The new runs still use the existing
+YOLOv8-trained **pitch landmark** checkpoint for geometry; YOLO26 Pose replaces
+the person-pose model, not those auxiliary weights. To make *every* YOLO
+component YOLO26, retrain the 32-keypoint pitch model and the optional player
+crop detector, validate their results, and then update their checkpoint paths.
+Changing an old checkpoint filename does not convert its architecture.
+
+For the pitch retraining path, install the pinned host detector dependency and
+run this in a separate tmux session after checking GPU availability. Keep the
+dataset on mounted storage if transferring or re-extracting it; point `--data`
+to its actual `data.yaml` path. The new run name avoids overwriting the YOLOv8
+pitch checkpoint.
+
+```bash
+python -m pip install -r requirements/detection.txt
+CUDA_VISIBLE_DEVICES=0 python train/train_pitch_server.py \
+  --data /mnt/storage2/vincent/football-pose/datasets/football-field-detection-15/data.yaml \
+  --project /mnt/storage2/vincent/football-pose/models/pitch-training \
+  --imgsz 1280 --epochs 100 --batch 8
+```
+
+The trained checkpoint path and hash appear in `pitch-validation.json`.
+Check landmark overlays and usable geometry on the football video before
+substituting it into `pitch_filter.checkpoint`. For the optional learned-crop
+detector, use its own detection dataset and training entry point:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python train/train_player_server.py \
+  --data /mnt/storage2/vincent/football-pose/datasets/football-players-detection-20/data.yaml \
+  --project /mnt/storage2/vincent/football-pose/models/player-training \
+  --imgsz 1280 --epochs 100 --batch 8
+```
+
+The player dataset path is an example: verify the exported dataset and
+`data.yaml` exist there first. The resulting `player-validation.json` gives the
+checkpoint hash, box metrics, and class names. Validate actual football-video
+crops and the `class_ids` in `configs/server-three-models.yaml` before enabling
+the `crop` processor. No newly trained YOLO26 pitch/player weights exist merely
+because these training scripts and paths are configured.
+
 ## COCO keypoints setup check (2026-09-30)
 
 This is separate from the football experiments: original COCO images, no pitch

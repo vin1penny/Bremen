@@ -1,6 +1,6 @@
-name: lyra-yolo-one-gpu-smoke
+name: lyra-yolo26-one-gpu-smoke
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
-output_dir: /home/vincent/football-pose-results/yolo-one-gpu-smoke
+output_dir: /mnt/storage2/vincent/football-pose/results/football/yolo26-one-gpu-smoke
 
 video_output:
   enabled: true
@@ -46,12 +46,13 @@ cache:
   pin: true
 
 models:
-  - id: yolo-pose
+  - id: yolo26-pose
     command:
       - bash
       - runners/container-runner.sh
-      - vincent/football-pose-yolo:dev
-    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+      - vincent/football-pose-yolo26:dev
+      - --nms-free
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
     batch_size: 8
     min_batch_size: 1
     # Replace 0 in the private copy with the physical GPU assigned in Lyra's

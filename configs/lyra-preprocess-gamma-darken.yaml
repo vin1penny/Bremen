@@ -1,6 +1,6 @@
-name: lyra-native-preprocess-gamma-darken
+name: lyra-native-yolo26-preprocess-gamma-darken
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
-output_dir: /home/vincent/football-pose-results/native-resolution/preprocessing/gamma-darken
+output_dir: /mnt/storage2/vincent/football-pose/results/football/yolo26-preprocessing/gamma-darken
 
 video_output:
   enabled: true
@@ -38,19 +38,20 @@ cache:
   pin: true
 
 models:
-  - id: yolo-pose
+  - id: yolo26-pose
     command:
       - bash
       - runners/container-runner.sh
-      - vincent/football-pose-yolo:dev
+      - vincent/football-pose-yolo26:dev
       - --imgsz
       - "1920"
       - --confidence
       - "0.25"
-    checkpoint: /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
+      - --nms-free
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
     batch_size: 8
     min_batch_size: 1
-    devices: [7]
+    devices: [0]
     timeout_seconds: 3600
 
   - id: openpose-body25
@@ -62,7 +63,7 @@ models:
     checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
     batch_size: 1
     min_batch_size: 1
-    devices: [7]
+    devices: [0]
     timeout_seconds: 7200
 
 fail_fast: false
