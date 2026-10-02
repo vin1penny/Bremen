@@ -115,6 +115,12 @@ pose model and does not change any pose estimate. It runs once per source video 
 settings combination, and its checkpoint hash and geometry cache ID are recorded in
 the experiment summary. This keeps crowd filtering identical across YOLO Pose,
 OpenPose, and later HRNet comparisons.
+Active football configs run pitch landmark inference at `image_size: 640` on every
+original video frame, then map the predicted coordinates back to that frame for
+geometry fitting and rendering. This does not downscale the separate person-pose
+inputs: OpenPose remains at `1920x1088` and YOLO Pose at its configured size.
+The historical pitch-weight comparison configs remain pinned to 1280 and must not
+be mixed with the new 640-pixel pitch-filter results without noting that change.
 
 ## Pitch-aware filtering
 

@@ -11,6 +11,27 @@ from football_pose.configuration import ExperimentConfig, load_config
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "lyra-openpose-full-frame.yaml",
+        "lyra-openpose-tiled.yaml",
+        "lyra-yolo-full-frame.yaml",
+        "lyra-yolo-tiled.yaml",
+        "lyra-yolo26-full-frame.yaml",
+        "lyra-yolo-one-gpu.yaml",
+        "lyra-preprocess-clahe.yaml",
+        "lyra-preprocess-gamma-brighten.yaml",
+        "lyra-preprocess-gamma-darken.yaml",
+        "lyra-preprocess-unsharp.yaml",
+    ],
+)
+def test_active_football_configs_use_640_pitch_inference(filename: str) -> None:
+    config = load_config(REPOSITORY / "configs" / filename, check_paths=False)
+    assert config.pitch_filter.enabled
+    assert config.pitch_filter.image_size == 640
+
+
 def test_config_rejects_duplicate_model_ids() -> None:
     with pytest.raises(ValidationError, match="model ids must be unique"):
         ExperimentConfig.model_validate(

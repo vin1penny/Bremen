@@ -1,5 +1,32 @@
 # Lyra server runbook
 
+## Pitch inference at 640 pixels (2026-10-02)
+
+Active football configs now set `pitch_filter.image_size: 640`. This changes only
+the YOLOv8 pitch-landmark inference, not OpenPose or YOLO26 person-pose input size.
+The pitch model runs on each original frame; its landmark coordinates are mapped
+back to source-video pixels before fitting and drawing the per-frame boundary.
+Changing this setting creates a new pitch-geometry cache entry and a new annotated
+video. Compare `pitch_filter.usable_frames` and visually inspect the landmarks and
+cyan boundary; a larger detection count alone does not prove accurate geometry.
+The two `lyra-pitch-weights-*` configs stay at 1280 as historical comparisons.
+
+If you already changed `configs/lyra-openpose-full-frame.yaml` on Lyra from GPU 7
+to GPU 0, keep that local GPU choice and change only `image_size: 1280` to
+`image_size: 640` in that file before rerunning. Do not use `git pull` to overwrite
+an uncommitted GPU change. Check both settings first:
+
+```bash
+grep -E 'image_size:|device:|devices:' configs/lyra-openpose-full-frame.yaml
+export CUDA_VISIBLE_DEVICES=0
+python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
+python -m football_pose run configs/lyra-openpose-full-frame.yaml
+```
+
+The expected OpenPose config values for this GPU-0 review are `image_size: 640`,
+pitch `device: "0"`, and model `devices: [0]`. The completed summary gives the new
+MP4 path in `jobs[].outputs.video`.
+
 ## YOLO26 across the thesis pipeline (2026-10-01)
 
 YOLO26x Pose is now the active **person-pose** model in the COCO check and all
