@@ -14,8 +14,8 @@ flowchart LR
     C --> A["Content-addressed lossless artifact"]
     P --> A
     A --> Y["YOLO Pose: all selected GPUs"]
-    Y --> H["HRNet-W32: all selected GPUs"]
-    H --> O["OpenPose: all selected GPUs"]
+    Y --> O["OpenPose: all selected GPUs"]
+    O --> H["HRNet-W32 + YOLO player detector: all selected GPUs"]
     Y --> R["Validated COCO-17 JSONL"]
     H --> R
     O --> R
@@ -28,6 +28,15 @@ flowchart LR
 ```
 
 The model arrows describe scheduling, not data dependence: every model reads the same immutable artifact. Models run serially to give each one all selected GPUs and to avoid cross-model memory contention. Within a model, artifact sequence index modulo GPU count assigns frames or crops to independent processes. Their records are schema-validated, checked for duplicate identities, sorted deterministically, and atomically merged.
+
+HRNet is top-down: its runner uses the existing trained YOLO football player
+detector to turn full-frame or tiled packets into person crops before pose
+inference. Already detected person-crop packets bypass detection. Crop transforms
+are composed with the packet's source transform, so HRNet also outputs original
+video coordinates. The adapter never advances a tracker separately for each tile;
+the optional shared crop processor handles frame-level tracking. HRNet model wall
+time includes its detector and crop stage; comparisons use its own fixed-protocol
+baseline. Generic MMDetection human detection is disabled.
 
 Pitch localization is independent of preprocessing and pose inference. One
 source/checkpoint/settings combination creates a reusable geometry manifest. Each pose
@@ -51,6 +60,14 @@ An external runner receives:
 ```
 
 Any new model that implements this command contract can be inserted through YAML without changing the orchestrator.
+Models may declare `auxiliary_checkpoints: {detector: PATH}`. The orchestrator
+resolves and validates these files, fingerprints their contents, and passes
+`--detector-checkpoint PATH` to HRNet. The container wrapper bind-mounts that exact
+file read-only, just like the primary pose checkpoint. Both hashes enter archive
+provenance and screening reports.
+Containers run as the invoking user's UID/GID with writable temporary runtime
+caches. This preserves user ownership of outputs and permits access to private
+mounted-storage files without relying on container-root access to NFS.
 The special command token `{python}` resolves to the orchestrator's active Python interpreter and is useful for the local mock runner. Real model configurations normally name their isolated environment explicitly.
 Input, output, cache, and checkpoint fields are resolved relative to the YAML file. Command elements are executed verbatim from the directory in which the orchestrator was started; the supplied examples assume the repository root.
 

@@ -1,473 +1,26 @@
-# Lyra server runbook
+# Lyra server command guide
 
-## Pitch inference at 640 pixels (2026-10-02)
+Run **Mac** commands in a local terminal and **Lyra** commands after SSH.
+Paste commands only, not the terminal prompt or previous output.
+For the experiment design and output definitions, see [experiment.md](experiment.md).
 
-Active football configs now set `pitch_filter.image_size: 640`. This changes only
-the YOLOv8 pitch-landmark inference, not OpenPose or YOLO26 person-pose input size.
-The pitch model runs on each original frame; its landmark coordinates are mapped
-back to source-video pixels before fitting and drawing the per-frame boundary.
-Changing this setting creates a new pitch-geometry cache entry and a new annotated
-video. Compare `pitch_filter.usable_frames` and visually inspect the landmarks and
-cyan boundary; a larger detection count alone does not prove accurate geometry.
-The two `lyra-pitch-weights-*` configs stay at 1280 as historical comparisons.
+## 1. Connect and start a session
 
-If you already changed `configs/lyra-openpose-full-frame.yaml` on Lyra from GPU 7
-to GPU 0, keep that local GPU choice and change only `image_size: 1280` to
-`image_size: 640` in that file before rerunning. Do not use `git pull` to overwrite
-an uncommitted GPU change. Check both settings first:
-
-```bash
-grep -E 'image_size:|device:|devices:' configs/lyra-openpose-full-frame.yaml
-export CUDA_VISIBLE_DEVICES=0
-python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
-python -m football_pose run configs/lyra-openpose-full-frame.yaml
-```
-
-The expected OpenPose config values for this GPU-0 review are `image_size: 640`,
-pitch `device: "0"`, and model `devices: [0]`. The completed summary gives the new
-MP4 path in `jobs[].outputs.video`.
-
-## YOLO26 across the thesis pipeline (2026-10-01)
-
-YOLO26x Pose is now the active **person-pose** model in the COCO check and all
-tracked Lyra football YOLO configurations: full-frame, tiling, CLAHE, both gamma
-settings, unsharp, and the one-GPU smoke test. The combined preprocessing
-configs still run OpenPose after YOLO26. Old YOLOv8 runs remain in their original
-result directories; new football runs write under
-`/mnt/storage2/vincent/football-pose/results/football/yolo26-*`. Do not compare
-a YOLO26 ablation with the old YOLOv8 baseline. The older instructions below
-describe the earlier setup and are retained as historical context.
-
-On Lyra, pull the latest code and build the YOLO26 container using the commands
-in the next section. Download `yolo26x-pose.pt` to the exact checkpoint path
-shown there. Check GPU availability and reserve one GPU. These tracked YOLO26
-football configs select physical GPU 0 for pose inference; their pitch-filter
-device is also `"0"`. If GPU 0 is unavailable, copy the configs to your private
-directory and change every `models[].devices` entry **and**
-`pitch_filter.device` to the same chosen physical GPU ID. Export that ID through
-`CUDA_VISIBLE_DEVICES` before running. The COCO config has no pitch filter.
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export CUDA_VISIBLE_DEVICES=0
-python -m pytest -q
-python -m football_pose validate-config configs/lyra-yolo-full-frame.yaml
-tmux new -A -s yolo26-football
-```
-
-Run the first commands **inside tmux** after it opens. The baseline and tiling
-use the same YOLO26 checkpoint and input size; only the preprocessing differs.
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export CUDA_VISIBLE_DEVICES=0
-python -m football_pose run configs/lyra-yolo-full-frame.yaml
-python -m football_pose run configs/lyra-yolo-tiled.yaml
-for config in configs/lyra-preprocess-*.yaml; do
-  python -m football_pose run "$config"
-done
-```
-
-Do not start the full loop until the baseline's YOLO26 result and video look
-reasonable. Detach tmux with Ctrl+B then D, and reattach with
-`tmux attach -t yolo26-football`. The new runs deliberately keep the accepted
-YOLOv8-trained **pitch landmark** checkpoint for geometry. YOLO26 replaces the
-compared person-pose model only. Do **not** retrain or swap the pitch checkpoint
-for this migration: keeping its hash and settings fixed makes the model and
-preprocessing comparisons interpretable.
-
-The optional learned-crop detector is separate from pitch localization. If you
-want a YOLO26 detector for that optional step, install the pinned host
-dependency and train against the appropriate detection dataset:
-
-```bash
-python -m pip install -r requirements/detection.txt
-CUDA_VISIBLE_DEVICES=0 python train/train_player_server.py \
-  --data /mnt/storage2/vincent/football-pose/datasets/football-players-detection-20/data.yaml \
-  --project /mnt/storage2/vincent/football-pose/models/player-training \
-  --imgsz 1280 --epochs 100 --batch 8
-```
-
-The player dataset path is an example: verify the exported dataset and
-`data.yaml` exist there first. The resulting `player-validation.json` gives the
-checkpoint hash, box metrics, and class names. Validate actual football-video
-crops and the `class_ids` in `configs/server-three-models.yaml` before enabling
-the `crop` processor. This player-detector training is optional; it does not
-change the accepted YOLOv8 pitch checkpoint.
-
-## COCO keypoints setup check (2026-09-30)
-
-This is separate from the football experiments: original COCO images, no pitch
-filtering, no preprocessing and no video rendering. The initial configuration
-tests YOLO Pose and OpenPose serially. HRNet is not included until we fix its
-person-detector/box protocol and reference checkpoint.
-
-### Test YOLO26 Pose against the completed YOLOv8 result
-
-The earlier COCO run used `yolov8x-pose.pt`. To test the newer COCO-pretrained
-YOLO26x Pose model, pull the current branch and use
-`configs/lyra-coco-yolo26.yaml`. It stores results in the same mounted results
-root with a distinct `yolo26-pose` model ID and a new timestamped run directory.
-The COCO dataset and cached original images are reused.
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-
-docker image ls vincent/football-pose-yolo:dev
-docker build -f containers/Dockerfile.yolo26 \
-  -t vincent/football-pose-yolo26:dev .
-docker run --rm --entrypoint python3 \
-  vincent/football-pose-yolo26:dev \
-  -c 'import ultralytics; print(ultralytics.__version__)'
-```
-
-The base YOLO image must exist before this build. The new image reuses its
-large dependency layers, updates Ultralytics, and must print `8.4.164`.
-
-Download the official checkpoint into the private checkpoint directory (a
-tracked YAML file points to this exact path):
-
-```bash
-mkdir -p /home/vincent/football-pose-private/checkpoints
-curl -fL --retry 3 -C - \
-  -o /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt \
-  https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x-pose.pt
-sha256sum /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
-
-docker run --rm --entrypoint python3 \
-  --volume /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt:/tmp/yolo26x-pose.pt:ro \
-  vincent/football-pose-yolo26:dev \
-  -c 'from ultralytics import YOLO; m = YOLO("/tmp/yolo26x-pose.pt"); print(m.task, m.model.model[-1].kpt_shape)'
-```
-
-The checkpoint check should print `pose (17, 3)` (or the equivalent list). Check
-current GPU availability before starting. The tracked config requests physical
-GPU 0; if another GPU is free, copy the YAML to your private configs directory
-and change `devices: [0]` there. Export the same physical GPU ID in that shell.
-
-```bash
-nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
-export CUDA_VISIBLE_DEVICES=0
-python -m football_pose evaluate-coco configs/lyra-coco-yolo26.yaml --limit 50
-python -m football_pose evaluate-coco configs/lyra-coco-yolo26.yaml
-```
-
-Run these inside tmux if you may disconnect. The full run writes its own
-`model-00/coco-evaluation.txt`, `coco-predictions.json`, and `summary.json` under
-`/mnt/storage2/vincent/football-pose/results/coco-keypoints/<run-id>/`. The
-official YOLO26x Pose reference is 71.6% COCO keypoint AP at 640 pixels using
-its `nms=False` head. This config requests that head with `--nms-free` and saves
-the exact checkpoint hash and inference arguments for your comparison.
-
-For the football video after checking the COCO output, use the separate
-`configs/lyra-yolo26-full-frame.yaml`. It uses the same checkpoint and YOLO26
-container at 1920 input size, includes the pitch filter and annotated video,
-and writes results to the mounted storage. It currently selects GPU 0 for both
-pitch processing and pose inference; change both device settings if your GPU
-reservation changes.
-
-After these code changes have been pushed, update the server clone with
-`git pull --ff-only`. Existing model containers can be reused: the container
-wrapper mounts the current repository and runs its runner scripts.
-
-Start or attach tmux **on Lyra**, then run the following inside its shell:
-
-```bash
-tmux new -s coco-evaluation
-```
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-python -m pip install -r requirements/evaluation.txt
-python -m pytest -q
-df -h /home/vincent
-```
-
-COCO validation requires the **val2017 images** and
-`annotations/person_keypoints_val2017.json`, not the instances annotations.
-The archives, extracted dataset, lossless image cache, raw predictions, and
-evaluation results are all large or potentially large, so they belong on the
-mounted storage—not under `/home/vincent`. The tracked configuration uses:
-
-| Content | Mounted path |
-| --- | --- |
-| Downloaded and extracted dataset | `/mnt/storage2/vincent/football-pose/datasets/coco` |
-| Lossless evaluation artifact cache | `/mnt/storage2/vincent/football-pose/cache/coco` |
-| Predictions, logs, and summaries | `/mnt/storage2/vincent/football-pose/results/coco-keypoints` |
-
-Create and verify all three locations before downloading:
-
-```bash
-mkdir -p \
-  /mnt/storage2/vincent/football-pose/datasets/coco \
-  /mnt/storage2/vincent/football-pose/cache/coco \
-  /mnt/storage2/vincent/football-pose/results/coco-keypoints
-
-test -w /mnt/storage2/vincent/football-pose/datasets/coco \
-  && echo "COCO dataset directory is writable"
-test -w /mnt/storage2/vincent/football-pose/cache/coco \
-  && echo "COCO cache directory is writable"
-test -w /mnt/storage2/vincent/football-pose/results/coco-keypoints \
-  && echo "COCO results directory is writable"
-df -hT /mnt/storage2
-```
-
-If the dataset is not already present, download it directly onto the mount from
-the [official COCO distribution](https://cocodataset.org/#download):
-
-```bash
-cd /mnt/storage2/vincent/football-pose/datasets/coco
-curl -fL --retry 3 -C - -o val2017.zip http://images.cocodataset.org/zips/val2017.zip
-curl -fL --retry 3 -C - -o annotations_trainval2017.zip http://images.cocodataset.org/annotations/annotations_trainval2017.zip
-
-# Verify the upstream archives after using the HTTP endpoint. Do not use curl -k.
-printf '%s  %s\n' \
-  '442b8da7639aecaf257c1dceb8ba8c80' 'val2017.zip' \
-  'f4bbac642086de4f52a3fdda2de5fa2c' 'annotations_trainval2017.zip' \
-  | md5sum --check -
-
-unzip -n val2017.zip
-unzip -n annotations_trainval2017.zip
-
-test -f annotations/person_keypoints_val2017.json \
-  && echo "COCO keypoint annotations found"
-find val2017 -maxdepth 1 -type f -name '*.jpg' | wc -l
-```
-
-The final count must be 5,000 images. Keep both the dataset itself and the
-generated PNG artifact cache on the mount. No COCO training images are needed.
-The COCO file host may present a mismatched certificate over HTTPS on Lyra, so
-the commands use its established HTTP endpoint and then verify both downloaded
-archives against their published MD5 checksums. Type or paste raw URLs in a
-shell—never the Markdown form `[URL](URL)`.
-
-Check availability/reservation according to the shared-server policy. GPU 7 is
-only a default, not a permanent reservation. If selecting another GPU, change
-both model `devices` entries in the COCO YAML and the export below.
-
-```bash
-cd /home/vincent/projects/Bremen
-nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
-export CUDA_VISIBLE_DEVICES=7
-python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml --limit 50
-```
-
-Check that both jobs report `COMPLETE`, then run the full validation set:
-
-```bash
-python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml
-```
-
-Use `--model yolo-pose` or `--model openpose-body25` to run one model. Detach with
-Ctrl+B, then D; reconnect with `tmux attach -t coco-evaluation`.
-
-Each invocation prints and saves a new timestamped `summary.json` under
-`/mnt/storage2/vincent/football-pose/results/coco-keypoints/`. Read a specific summary
-with `cat` or download it with `scp vincent@lyra:ABSOLUTE_SUMMARY_PATH ~/Downloads/`
-from your Mac. Each model directory also contains `coco-predictions.json`, the
-official evaluator's `coco-evaluation.txt`, canonical JSONL and runner logs.
-
-Metrics use 0–1 (multiply by 100 for percentage points); -1 means no evaluable
-ground truth in that category/size bin. A 50-image result is a smoke test, not
-a comparable benchmark. `success` means execution succeeded, **not** that a
-reference accuracy was matched. Supply the reference split, checkpoint,
-inference settings, score source and desired tolerance before judging agreement.
-
-The initial YOLOv8 settings are 640 pixels, confidence 0.001, NMS IoU 0.7; OpenPose
-is BODY_25, single scale, net resolution -1x368, mapped to COCO-17. These are
-explicit benchmark settings, not changes to the football experiment configs.
-Do not compare BODY_25 single-scale results against a COCO-18 or multiscale
-reference. Native model person scores are retained for COCO ranking.
-
-## Weserstadion calibration and pitch training (2026-09-25)
-
-Pitch coordinates are now hard-coded for **Weserstadion, Bremen: 105 × 68 m**.
-This assumption must be changed for other venues. Video overlays show magenta
-predicted landmarks labelled P0–P31 and confidence (display threshold 0.5), even
-when calibration fails. Cyan remains the fitted outer boundary. All finite raw
-landmarks are saved in geometry.json; old geometry caches invalidate automatically.
-
-Train the pitch model only using the server entry point corresponding to the pitch
-section of `train/train_remote.ipynb`. The current high-resolution candidate uses
-dataset version 15, YOLOv8n-pose, 1280 input size, batch 8, 100 epochs, and no mosaic.
-This setting was chosen on 2026-09-25 and must be evaluated against the earlier run.
-For reference, the proven local settings were 640, batch 2, and 50 epochs. The
-previous server run with batch 16 and 20 epochs reached only pose mAP50 0.322 and
-pose mAP50–95 0.055; do not use its checkpoint. The earlier 50-epoch, batch-2 run
-reached 0.984 and 0.614 respectively. Server training reuses the fixed
-`pitch-production` directory and overwrites its weights on the next run. The
-validation file records the resulting checkpoint hash and metrics.
-The script validates the saved checkpoint using **pose** metrics, not box metrics.
-The notebook's export comparison has also been corrected to validated pose mAP50–95.
-
-From the Mac, upload the existing version-15 dataset (includes its data.yaml):
-
-```bash
-ssh vincent@lyra 'mkdir -p /home/vincent/football-pose-private/datasets'
-scp -r /Users/larry/Bremen/FootballTrackingDataGeneration-main/train/datasets/football-field-detection-15 \
-  vincent@lyra:/home/vincent/football-pose-private/datasets/
-```
-
-On Lyra, pull the changes, check GPU availability, then create/attach tmux:
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-nvidia-smi
-tmux new -A -s pitch-training
-```
-
-Inside tmux (GPU 7 must be available and permitted):
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-CUDA_VISIBLE_DEVICES=7 python train/train_pitch_server.py \
-  --data /home/vincent/football-pose-private/datasets/football-field-detection-15/data.yaml \
-  --project /home/vincent/football-pose-private/pitch-training \
-  --imgsz 1280 --epochs 100 --batch 8
-```
-
-Detach with Ctrl+B then D; return using `tmux attach -t pitch-training`.
-Training prints the exact checkpoint path, SHA-256 and validation metrics and saves
-`pitch-validation.json` in that run directory. First test that checkpoint on the
-video: copy the experiment YAML to a new file **inside configs/** and change only
-`pitch_filter.checkpoint` to the printed absolute path. Run this copied config
-with `CUDA_VISIBLE_DEVICES=7`. Inspect landmark alignment and boundary coverage.
-After validation, copy that checkpoint to the production checkpoint path referenced
-by the configs. No newly trained weights exist until server training completes. The
-initial YOLO backbone may download on first use.
-
-### Compare the earlier and new pitch weights
-
-Do not overwrite `checkpoints/pitch-landmarks-best.pt` before this comparison. The
-two configs use identical 1280 inference settings and thresholds; only their pitch
-checkpoint and output directory differ. Confirm the hashes first:
-
-```bash
-sha256sum \
-  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt \
-  /home/vincent/football-pose-private/pitch-training/pitch-production/weights/best.pt
-```
-
-Expected hashes are `dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`
-for the earlier weights and `f9529826820fff8ce7e1657d0d901f296907e52db9491e60855eb7ab349102e7`
-for the new weights. If the first hash is already the new hash, upload the earlier
-local checkpoint again before running the comparison.
-
-Run both sequentially inside tmux:
-
-```bash
-CUDA_VISIBLE_DEVICES=7 python -m football_pose run configs/lyra-pitch-weights-earlier.yaml
-CUDA_VISIBLE_DEVICES=7 python -m football_pose run configs/lyra-pitch-weights-new-1280.yaml
-```
-
-Compare `usable_frames`, `on_pitch_records`, `outside_pitch_records`,
-`unclassified_records`, median reprojection diagnostics, and both output videos.
-Choose the production checkpoint only after visually checking that magenta landmark
-IDs sit on their intended field intersections throughout camera movement.
-
-
-## Pitch-boundary correction — 2026-09-24
-
-The rectangular pitch fallback has been removed. Each frame needs its own accepted
-landmark geometry; the renderer draws its perspective polygon in cyan. Failed fits
-are yellow/unavailable, and are not treated as confirmed outside or inside. No
-neighboring-frame transform is copied. `bbox_frames` is diagnostic only; inspect
-`pitch_filter.usable_frames` against `frame_count` to assess boundary coverage.
-
-The new code invalidates the old geometry cache automatically. Old videos and raw
-archives remain on disk. Existing `max_fallback_frames` and `pitch_bbox_margin_px`
-YAML keys remain readable for compatibility but no longer enable fallback behavior.
-Use the corrected checkpoint below: the previous exported checkpoint failed five
-sampled-frame geometry checks, whereas this training-run checkpoint passed all five.
-Upload from the Mac (the distinct filename prevents accidental reuse of old weights):
-
-```bash
-scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/models/pitch_detection_model/weights/best.pt \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
-```
-
-Expected SHA-256: `dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`.
-All tracked Lyra YAML files now reference `pitch-landmarks-best.pt`; older transfer
-examples below using `pitch-detection-best.pt` describe the superseded checkpoint.
-After pulling the correction and reserving the configured GPU, validate and run
-`configs/lyra-openpose-full-frame.yaml` first. Download the exact video recorded in
-its new summary; verify the cyan polygon follows the sidelines as the camera moves.
-A completed run with low usable-frame coverage is not evidence of reliable filtering.
-
-This is the durable reference for connecting to Lyra, locating the project, testing it safely, and running thesis experiments. Update the path table whenever a location changes.
-
-## Saved connection and repository details
-
-| Item                                         | Saved value                                               |
-| -------------------------------------------- | --------------------------------------------------------- |
-| SSH alias                                    | `lyra`                                                    |
-| Server hostname                              | `lyra.d2ip.tu-berlin.de`                                  |
-| Server IP snapshot                           | `141.23.38.146`                                           |
-| Server user                                  | `vincent`                                                 |
-| Server home                                  | `/home/vincent`                                           |
-| Server repository                            | `/home/vincent/projects/Bremen`                           |
-| GitHub repository                            | `https://github.com/vin1penny/Bremen.git`                 |
-| Working branch                               | `codex/modular-football-pipeline`                         |
-| Local Mac repository                         | `/Users/larry/Bremen/FootballTrackingDataGeneration-main` |
-| Regenerable server cache (current fallback)  | `/home/vincent/football-pose-cache/artifacts`             |
-| Preferred shared cache (not yet provisioned) | `/lyra/cache/vincent/football-pose/artifacts`             |
-| Suggested private-data root                  | `/home/vincent/football-pose-private`                     |
-| Suggested results root                       | `/home/vincent/football-pose-results`                     |
-| Approved mounted video root                  | `/mnt/storage2/vincent/football-pose/videos`              |
-| Mounted input videos                         | `/mnt/storage2/vincent/football-pose/videos/input`        |
-| Mounted rendered/output videos               | `/mnt/storage2/vincent/football-pose/videos/output`       |
-
-Confirm with the Lyra administrator whether `/home/vincent` is backed up and whether it has a quota. Do not treat `/lyra/cache` as backed-up storage.
-
-## Observed Lyra environment
-
-Recorded on 2026-08-17. Recheck before diagnosing a future environment problem.
-
-| Component                          | Observed value                                                      |
-| ---------------------------------- | ------------------------------------------------------------------- |
-| Operating system                   | Debian GNU/Linux 12 (Bookworm)                                      |
-| Python                             | 3.12.4                                                              |
-| Git                                | 2.39.5                                                              |
-| Docker                             | 28.1.1                                                              |
-| Docker NVIDIA runtime              | Available                                                           |
-| GPUs                               | 8 x NVIDIA A100-SXM4 40 GB                                          |
-| NVIDIA driver                      | 575.51.03                                                           |
-| Driver-reported CUDA compatibility | 12.9                                                                |
-| `nvitop`                           | Not installed; use `nvidia-smi`                                     |
-| `/lyra` snapshot                   | 2.1 TB total, 226 GB available, 90% used                            |
-| Root filesystem snapshot           | 94 GB total, 1.4 GB available, 99% used                             |
-| `/home` snapshot                   | 4.7 TB total, 224 GB available, 96% used                            |
-| Built YOLO image                   | `vincent/football-pose-yolo:dev` (9.84 GB)                          |
-| Verified YOLO packages             | PyTorch 2.5.1+cu124, Ultralytics 8.4.19, OpenCV 4.10.0, PyAV 14.2.0 |
-
-The CUDA number printed by `nvidia-smi` describes the driver's maximum compatible CUDA version. Each model container supplies its own pinned CUDA runtime.
-
-## 1. Connect to Lyra
-
-Connect to the university VPN first if Lyra is not reachable from the current network. From the Mac Terminal:
+**On the Mac:**
 
 ```bash
 ssh vincent@lyra
 ```
 
+Lyra: `lyra.d2ip.tu-berlin.de` · IP: `141.23.38.146` · account: `vincent`.
+
+Saved account password, retained by request:
+
+```text
 fkBoDT9a61VZlFE4VSOD
+```
 
-
-The Mac SSH alias should resolve directly to the hostname from the server account
-email:
+If the SSH alias is missing, add this to `~/.ssh/config` on the Mac:
 
 ```sshconfig
 Host lyra
@@ -477,928 +30,682 @@ Host lyra
     IdentitiesOnly yes
 ```
 
-Do not retain an old `ProxyCommand` or the obsolete internal address `192.168.5.6` in
-this host block.
+Use the university VPN if required. Do not keep an obsolete jump-host address.
+A `user@host's password` prompt asks for that server account's password;
+`Enter passphrase for key ...` asks for the local key's passphrase.
 
-On the first connection, verify the host fingerprint with the administrator before accepting it. Never share a password or private SSH key.
-
-Confirm the session:
-
-```bash
-hostname
-whoami
-pwd
-nvidia-smi
-```
-
-Expected identity:
-
-```text
-lyra
-vincent
-/home/vincent
-```
-
-Disconnect with:
+**On Lyra:** check available GPUs, then create or reconnect to tmux:
 
 ```bash
-exit
+nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
+tmux new -A -s football-experiment
 ```
 
-## 2. Clone the project for the first time
+**Inside tmux**, activate the project environment. Repeat this in every new shell:
 
-On Lyra:
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
+which python
+python --version
+```
+
+Expected Python: `/home/vincent/projects/Bremen/.venv/bin/python`, version 3.12.
+The system `python` can be Python 2.7. This repo uses `PYTHONPATH`, not
+`pip install -e .` (there is no packaging file).
+
+### tmux essentials
+
+| Action | Command / keys |
+| --- | --- |
+| List server sessions | `tmux ls` |
+| Reconnect | `tmux attach -t football-experiment` |
+| Leave running | Ctrl+B, then D |
+| Scroll previous output | Ctrl+B, then [; arrows/Page Up; Q to return |
+| Enable mouse scrolling | `tmux set -g mouse on` |
+| End an idle shell/session | `exit` |
+
+Use tmux **on Lyra**, not on the Mac. Detach before closing SSH; do not press Ctrl+C
+if the job should continue. Reconnect with SSH and then attach to the same session.
+Other useful session names: `pitch-finetune`, `pitch-pipeline-review`,
+`coco-evaluation`; substitute the name in the commands above.
+Use `tee` below to keep complete logs; tmux scrollback is limited.
+
+## 2. Locations and storage
+
+| What | Lyra path |
+| --- | --- |
+| Code and tracked YAML | `/home/vincent/projects/Bremen` |
+| Private checkpoints | `/home/vincent/football-pose-private/checkpoints` |
+| Private config copies | `/home/vincent/football-pose-private/configs` |
+| Input videos | `/mnt/storage2/vincent/football-pose/videos/input` |
+| Annotated output videos | `/mnt/storage2/vincent/football-pose/videos/output` |
+| YOLO26 / preprocessing results | `/mnt/storage2/vincent/football-pose/results/football` |
+| Existing OpenPose baseline results | `/home/vincent/football-pose-results/native-resolution` |
+| Existing preprocessing artifacts | `/home/vincent/football-pose-cache/artifacts` |
+| Existing pitch geometry cache | `/home/vincent/football-pose-cache/pitch` |
+| COCO dataset / cache / results | `/mnt/storage2/vincent/football-pose/{datasets/coco,cache/coco,results/coco-keypoints}` |
+| New pitch training / validation | `/mnt/storage2/vincent/football-pose/results/{pitch-training,pitch-validation}` |
+
+Put new large datasets, training runs and videos on mounted storage, not in Git or
+`/tmp`. Existing home-based caches and the pitch validation dataset have not
+been migrated. `/mnt/storage2` is NFS from `141.23.38.152:/raid0_ssd2`;
+backup/retention is not confirmed, so keep another copy of irreplaceable files.
+
+**Upload a video from the Mac** (replace the local source filename):
+
+```bash
+scp /Users/larry/Downloads/test-video.mp4 \
+  vincent@lyra:/mnt/storage2/vincent/football-pose/videos/input/
+```
+
+Then change `input:` in the chosen YAML to its absolute server path.
+The current sample is `/mnt/storage2/vincent/football-pose/videos/input/sample_30.mov`.
+
+**Check storage on Lyra:**
+
+```bash
+df -hT /home/vincent /mnt/storage2
+docker system df
+```
+
+Do not prune shared Docker storage or delete other users' files/processes.
+
+## 3. Select the GPU before any run
+
+Choose a GPU with no running compute processes and enough free memory, following
+the server's reservation policy. **0% utilization does not mean free**: a process
+can still occupy most of its memory. Recheck immediately before starting.
+
+Example using physical GPU **4**; it is not permanently reserved for us:
+
+```bash
+nvidia-smi -i 4
+export CUDA_VISIBLE_DEVICES=4
+nano configs/lyra-openpose-full-frame.yaml
+```
+
+In **every config you will run**, set both:
+
+```yaml
+models:
+  - id: openpose-body25
+    # Keep all other model settings unchanged.
+    devices: [4]
+pitch_filter:
+  # Keep all other pitch settings unchanged.
+  device: "4"
+```
+
+This is a settings excerpt, not a replacement config. Save nano with Ctrl+O,
+Enter; exit with Ctrl+X. For a config containing two models, change both device
+entries. COCO has no pitch filter.
+
+| Where | Value when using physical GPU 4 |
+| --- | --- |
+| Shell | `CUDA_VISIBLE_DEVICES=4` |
+| Football / COCO YAML model devices | `devices: [4]` |
+| Football YAML pitch device | `device: "4"` |
+| Direct Ultralytics training/validation CLI | `device=0` (the one exposed GPU) |
+
+Setting only the shell variable does **not** override YAML. Config defaults vary;
+check them rather than assuming GPU 7 or 0. Optionally copy a YAML to the private
+config directory before editing, then run that copy to keep Git clean.
+
+## 4. Run football experiments and render videos
+
+Current setup: **YOLO26x Pose** for people, **OpenPose BODY_25**, and a separate
+**YOLOv8 pitch-landmark model at 640**. Pose input settings are 1920 / 1920x1088
+in these football configs. The single-step suite below also includes HRNet-W32,
+using the stored YOLO player detector for its required person boxes.
+
+The pitch model runs on original frames, maps landmarks back to source-image
+coordinates, and estimates same-frame geometry. The pitch is hardcoded as
+**105 × 68 m for Weserstadion, Bremen only**. Do not change pitch weights/settings
+between person-preprocessing comparisons. Missing acceptable geometry is reported
+as unclassified, not a reliable rectangular pitch estimate.
+
+### One complete OpenPose run
+
+With the venv active and the shell/YAML GPU settings matching:
+
+```bash
+python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
+mkdir -p /mnt/storage2/vincent/football-pose/results/logs
+RUN_LOG="/mnt/storage2/vincent/football-pose/results/logs/openpose-$(date +%Y%m%dT%H%M%S).log"
+set -o pipefail
+python -m football_pose run configs/lyra-openpose-full-frame.yaml 2>&1 | tee "$RUN_LOG"
+```
+
+This saves predictions, pitch decisions, summary and annotated MP4. Detach tmux
+with Ctrl+B, D while it runs. A quiet terminal during inference does not prove a
+crash; check `nvidia-smi` and `docker ps` from another SSH terminal.
+
+### Manual YOLO/OpenPose configurations
+
+| Experiment | Config in `configs/` | Models run |
+| --- | --- | --- |
+| Full-frame baseline | `lyra-yolo-full-frame.yaml` | YOLO26 |
+| Deterministic tiling | `lyra-yolo-tiled.yaml` | YOLO26 |
+| Full-frame baseline | `lyra-openpose-full-frame.yaml` | OpenPose |
+| Deterministic tiling | `lyra-openpose-tiled.yaml` | OpenPose |
+| Contrast: CLAHE | `lyra-preprocess-clahe.yaml` | Both, sequentially |
+| Gamma darken | `lyra-preprocess-gamma-darken.yaml` | Both, sequentially |
+| Gamma brighten | `lyra-preprocess-gamma-brighten.yaml` | Both, sequentially |
+| Sharpening: unsharp mask | `lyra-preprocess-unsharp.yaml` | Both, sequentially |
+
+Replace the YAML filename in the validate/run commands above. To run one model
+from a two-model config, append `--model yolo26-pose` or
+`--model openpose-body25`. To prepare only the cached input, append
+`--prepare-only`. List available processing operators with
+`python -m football_pose list-processors`; additional operators need
+an explicit config and are not included in this eight-config screening.
+
+### All single-step conditions: 36 model jobs
+
+Use `configs/lyra-preprocessing-screen.yaml`: baseline plus resize x2, CLAHE,
+both gamma variants, NLM, bilateral denoising, sharpening, Wiener motion deblur,
+FSRCNN x2 super-resolution, tiling and tracked player cropping. YOLO26, OpenPose
+and HRNet run on every condition. HRNet's input adapter uses the existing
+YOLO football player detector, not a generic MMDetection detector.
+
+The suite applies `--device` to every model, pitch filter and crop detector;
+**you do not edit GPU IDs in twelve separate YAML files**. Edit shared input,
+weights and inference settings only in `configs/lyra-preprocessing-base.yaml`.
+All new caches, reports and videos use mounted storage.
+
+**Once on Lyra:** create the asset directory and download the pinned SR checkpoint:
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/models/super-resolution
+SR_CHECKPOINT=/mnt/storage2/vincent/football-pose/models/super-resolution/FSRCNN_x2.pb
+test -f "$SR_CHECKPOINT" || curl -fL --retry 3 \
+  https://raw.githubusercontent.com/Saafke/FSRCNN_Tensorflow/6a4812c4ef1c4f5947d79beafa32a05a6eb4a94d/models/FSRCNN_x2.pb \
+  -o "$SR_CHECKPOINT"
+printf '%s  %s\n' \
+  366b33f0084c7b3f2bf6724f0a2c77bca94fcec9d7b6d72389d330073b380d5c \
+  "$SR_CHECKPOINT" | sha256sum --check -
+```
+
+The checksum must report OK. **On the Mac**, upload the supplied player detector:
+
+```bash
+scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/models/player_detection_model_best/best.pt \
+  vincent@lyra:/mnt/storage2/vincent/football-pose/models/player-detection-best.pt
+```
+
+This is a separate crop detector; do not overwrite the pitch or person-pose weights.
+Its verified classes are 0 ball, 1 goalkeeper, 2 player and 3 referee; the crop
+condition and HRNet detector include [1, 2, 3]. Its hash is recorded with each screen.
+
+**Once on Lyra:** install HRNet's separate pose checkpoint and build its container.
+The YOLO weights supply person boxes; they do not replace HRNet's joint weights:
+
+```bash
+HRNET_CHECKPOINT=/mnt/storage2/vincent/football-pose/models/hrnet-w32-coco-256x192.pth
+test -f "$HRNET_CHECKPOINT" || curl -fL --retry 3 \
+  https://download.openmmlab.com/mmpose/v1/body_2d_keypoint/topdown_heatmap/coco/td-hm_hrnet-w32_8xb64-210e_coco-256x192-81c58e40_20220909.pth \
+  -o "$HRNET_CHECKPOINT"
+printf '%s  %s\n' 05654824f0c9b6b573ccaac7dc90e6d0 "$HRNET_CHECKPOINT" | md5sum --check -
+cd /home/vincent/projects/Bremen
+docker build -f containers/Dockerfile.hrnet -t vincent/football-pose-hrnet:dev .
+docker run --rm vincent/football-pose-hrnet:dev --help
+```
+
+The image pins PyTorch 2.1/CUDA 11.8 and a prebuilt MMCV 2.1 wheel; it also contains
+Ultralytics for the existing detector. The official HRNet download is about 122 MB.
+Both checkpoints stay on mounted storage and are mounted into the container read-only.
+The wrapper runs as your Lyra UID/GID so private NFS files remain accessible and
+new output files are owned by you, not container root. Runtime caches use container `/tmp`.
+
+**On Lyra**, check GPU availability, then open tmux:
+
+```bash
+nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
+tmux new -A -s preprocessing-all
+```
+
+Inside tmux, activate the environment as in section 1. Example with an available,
+permitted physical GPU 4:
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=4
+python -m football_pose screen-preprocessing \
+  configs/lyra-preprocessing-screen.yaml --device 4 --check-only
+```
+
+After preflight succeeds, validate HRNet on its own before the full screen:
+
+```bash
+docker run --rm --gpus "device=${CUDA_VISIBLE_DEVICES}" \
+  --entrypoint python3 vincent/football-pose-hrnet:dev \
+  -c 'import torch, mmpose; from mmcv.ops import get_compiler_version; print(torch.__version__, torch.version.cuda, get_compiler_version())'
+python -m football_pose screen-preprocessing \
+  configs/lyra-preprocessing-screen.yaml --device 4 --method baseline --model hrnet-w32
+```
+
+If native imports and the HRNet baseline succeed, start all 36 jobs:
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/results/logs
+SCREEN_LOG="/mnt/storage2/vincent/football-pose/results/logs/single-step-$(date +%Y%m%dT%H%M%S).log"
+set -o pipefail
+python -m football_pose screen-preprocessing \
+  configs/lyra-preprocessing-screen.yaml --device 4 2>&1 | tee "$SCREEN_LOG"
+```
+
+Detach: Ctrl+B, D. Reconnect: `tmux attach -t preprocessing-all`.
+Preflight checks files, SR checksum, processor parameters and container images.
+It does not reserve the GPU or prove that a full-resolution model will fit in VRAM.
+Denoising, SR and per-person crops can be expensive; allow the tmux job to finish.
+
+A timestamped run folder is printed below
+`/mnt/storage2/vincent/football-pose/results/football/single-step`.
+Open its `comparison.md` for the automatic table, `comparison.csv` for analysis,
+and `screening.json` for full summaries, errors, checkpoint hashes and video paths.
+These reports update after each condition. Failures are recorded, not treated as
+zero detections; other conditions continue. A new invocation preserves previous
+reports and runs fresh pose jobs, while cached preprocessing can be reused.
+
+To test only selected steps, repeat `--method`; the baseline is always included:
+
+```bash
+python -m football_pose screen-preprocessing \
+  configs/lyra-preprocessing-screen.yaml --device 4 \
+  --method nlm-denoise --method bilateral-denoise --model openpose-body25
+```
+
+Resize x2 and SR x2 create larger artifacts, but pose input sizes remain fixed at
+YOLO 1920 / OpenPose 1920x1088 for this comparison. The table measures yield and
+runtime, not football AP/PCK accuracy. Compare cold/warm preprocessing separately.
+Per-condition wall time includes all selected models and video rendering. HRNet's
+model wall time includes YOLO detection + crops + pose inference; its runner log
+also reports the stages separately. HRNet detects people in each processed full
+frame/tile, then applies its standard 256x192 per-person pose input. When the common
+artifact already contains person crops, it skips detection and reuses those crops.
+Keep the same pitch checkpoint at 640. To run the other two models while preparing
+HRNet, repeat `--model yolo26-pose --model openpose-body25`.
+
+## 5. Check results and download videos
+
+The terminal's JSON report is also saved as
+`<output_dir>/experiments/<experiment_id>/summary.json`.
+`jobs[].outputs.video` is the authoritative MP4 path.
+
+**On Lyra**, show the newest OpenPose full-frame summary and its video paths:
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+root = Path('/home/vincent/football-pose-results/native-resolution/openpose-full-frame')
+paths = list(root.glob('experiments/*/summary.json'))
+if not paths:
+    raise SystemExit('No summary found.')
+path = max(paths, key=lambda p: p.stat().st_mtime)
+report = json.loads(path.read_text())
+print('Summary:', path)
+print('Success:', report['success'])
+print('Pitch coverage:', report.get('pitch_filter', {}))
+for job in report['jobs']:
+    print('\nModel:', job['model_id'], 'Status:', job['status'])
+    print('Outputs:', json.dumps(job.get('outputs', {}), indent=2))
+    if job.get('error'):
+        print('Error:', job['error'])
+PY
+```
+
+For another experiment, change `root` to that YAML's `output_dir`.
+Newest summary may be a failed run; check success/status before downloading.
+
+| Output | Purpose |
+| --- | --- |
+| `summary.json` | Config, completion status, counts, timings and file paths |
+| `runner/predictions.jsonl`, `archive/predictions.parquet` | Raw person-pose records |
+| `archive/manifest.json` | Archive metadata |
+| `predictions-on-pitch.parquet` | Accepted, deduplicated on-pitch records |
+| `pitch-decisions.parquet` | Per-record inside/outside/unclassified/duplicate decisions |
+| `pitch-filter/.../manifest.json` | Pitch-filter counts/settings |
+| `runner/attempt-*/shard-*.stdout.log` / `stderr.log` | Model diagnostics |
+| MP4 on mounted storage | Poses, predicted pitch landmarks and estimated boundaries |
+
+Video colors: magenta pitch landmarks, cyan boundary, green inside, red outside,
+yellow unclassified (`unavailable` in decisions), gray duplicates.
+Counts are detection-yield diagnostics, **not accuracy**;
+overlapping tiles can create duplicates. `usable_frames / frame_count` measures
+accepted pitch-geometry coverage, not landmark accuracy.
+
+**Automated overview on Lyra:**
+
+```bash
+python -m football_pose build-overview /mnt/storage2/vincent/football-pose/results/football
+cat /mnt/storage2/vincent/football-pose/results/football/results-overview/records.md
+python -m football_pose build-overview /home/vincent/football-pose-results/native-resolution
+cat /home/vincent/football-pose-results/native-resolution/results-overview/records.md
+```
+
+These are separate result roots; an overview only includes summaries under its
+root. The older OpenPose baselines are not automatically included in the mounted
+YOLO26/preprocessing overview.
+
+**Download on the Mac, in a new local terminal** (not the SSH terminal).
+The successful video supplied on 2026-10-10 can be downloaded directly:
+
+```bash
+scp vincent@lyra:/mnt/storage2/vincent/football-pose/videos/output/lyra-native-openpose-full-frame-baseline/4ecb8ee7bd7311ea/openpose-body25-bdce5fcb08b065263bb29512-6d68a4e2.mp4 \
+  /Users/larry/Downloads/pitch-review-v8n.mp4
+open /Users/larry/Downloads/pitch-review-v8n.mp4
+```
+
+For future runs, substitute the exact video path printed by their summary.
+Download that run's JSON report too:
+
+```bash
+scp vincent@lyra:/home/vincent/football-pose-results/native-resolution/openpose-full-frame/experiments/4ecb8ee7bd7311ea/summary.json \
+  /Users/larry/Downloads/openpose-summary.json
+```
+
+## 6. Pitch validation, fine-tuning and production weights
+
+Use a separate tmux session: `tmux new -A -s pitch-finetune`.
+Activate the venv inside it and export the selected physical GPU as in section 1/3.
+Here `device=0` means the GPU exposed by that export.
+
+| Checkpoint | Location / role |
+| --- | --- |
+| Production | `/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt` |
+| Preserved nano reference | `/home/vincent/football-pose-private/checkpoints/pitch-v8n-reference.pt` |
+| Selected fine-tuned candidate | `/mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt` |
+
+The selected YOLOv8n candidate reported pose mAP50 **0.995**, mAP50–95 **0.844**
+on 34 validation images; the additional 20 epochs did not improve it.
+The supplied PitchVision x checkpoint performed worse on this validation set.
+Do **not** replace production with the local `models/pitch_detection_model/weights/best.pt`
+merely because it is named `best.pt`; that file contains the different x candidate.
+
+### Validate the current production checkpoint
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/results/pitch-validation
+set -o pipefail
+yolo pose val \
+  model=/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt \
+  data=/home/vincent/football-pose-private/pitch-training/pitch-production-data.yaml \
+  imgsz=640 batch=2 device=0 split=val \
+  project=/mnt/storage2/vincent/football-pose/results/pitch-validation \
+  name=pitch-v8n-640 \
+  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-validation/pitch-v8n-640.txt
+```
+
+Read the **Pose** columns, not the first four Box columns. Confirm the printed
+model summary is YOLOv8n-pose. The normalized YAML points to the existing
+`/home/vincent/football-pose-private/datasets/football-field-detection-15`
+dataset. Use the same images, split and settings when comparing checkpoints.
+
+### Start another fine-tuning cycle only when wanted
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/results/pitch-training
+set -o pipefail
+yolo pose train \
+  model=/home/vincent/football-pose-private/checkpoints/pitch-v8n-reference.pt \
+  data=/home/vincent/football-pose-private/pitch-training/pitch-production-data.yaml \
+  imgsz=640 batch=8 epochs=100 device=0 \
+  optimizer=AdamW lr0=0.0001 lrf=0.1 patience=20 mosaic=0.0 \
+  seed=0 deterministic=True workers=4 \
+  project=/mnt/storage2/vincent/football-pose/results/pitch-training \
+  name=pitch-v8n-finetune-640 \
+  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-640.txt
+```
+
+Use the printed save directory: repeated runs get numbered suffixes.
+Training uses 255 images; validation uses 34; leave the 28 test images held out.
+For another 20-epoch cycle, start from the selected candidate, use
+`epochs=20 lr0=0.00001 name=pitch-v8n-extra20-640`. Finished checkpoints have
+stripped optimizer state, so this is new fine-tuning, not `resume=True`.
+Validate candidates and inspect moving-camera video before adopting them.
+
+### Keep the selected candidate in the production slot
+
+This intentionally replaces the production checkpoint; the reference and training
+candidate remain intact. Run only when selecting this candidate for production:
+
+```bash
+cp -v \
+  /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt \
+  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
+sha256sum \
+  /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt \
+  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
+```
+
+Hashes must match. Rerun section 4 in `pitch-pipeline-review` tmux to inspect
+pitch landmarks/boundaries with OpenPose. No container rebuild is needed for
+changed pitch weights. Good validation scores do not guarantee accurate geometry
+on the football video.
+
+For a new dataset, upload the full export to mounted `datasets/pitch/`.
+The existing [training script](train/train_pitch_server.py) normalizes split paths:
+pass explicit `--data`, `--project`, `--model`, `--imgsz 640`,
+`--batch 8 --epochs 100` and a new `--name`; do not rely on its 1280 default.
+
+## 7. COCO keypoints evaluation
+
+This checks person-pose models on original COCO images, with **no pitch filter**
+or football preprocessing. It is separate from football detection-count screening.
+
+### Download once, on Lyra
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/datasets/coco
+cd /mnt/storage2/vincent/football-pose/datasets/coco
+curl -fL --retry 3 -C - -o val2017.zip \
+  http://images.cocodataset.org/zips/val2017.zip
+curl -fL --retry 3 -C - -o annotations_trainval2017.zip \
+  http://images.cocodataset.org/annotations/annotations_trainval2017.zip
+printf '%s  %s\n' \
+  442b8da7639aecaf257c1dceb8ba8c80 val2017.zip \
+  f4bbac642086de4f52a3fdda2de5fa2c annotations_trainval2017.zip | md5sum --check -
+```
+
+The HTTP endpoint is a workaround for the observed HTTPS certificate mismatch;
+do not use `curl -k`. Extract only after both archive checks report OK:
+
+```bash
+unzip -n val2017.zip
+unzip -n annotations_trainval2017.zip
+```
+
+Required files: `val2017/` (5,000 images) and
+`annotations/person_keypoints_val2017.json`.
+
+### Run inside tmux
+
+Open `tmux new -A -s coco-evaluation`, activate the project environment,
+select an available GPU, and change **both** model device entries in
+`configs/lyra-coco-keypoints.yaml` to the physical GPU ID.
+
+```bash
+cd /home/vincent/projects/Bremen
+python -m pip install -r requirements/evaluation.txt
+python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml --limit 50
+```
+
+After the smoke check succeeds, start the full run:
+
+```bash
+mkdir -p /mnt/storage2/vincent/football-pose/results/logs
+COCO_LOG="/mnt/storage2/vincent/football-pose/results/logs/coco-$(date +%Y%m%dT%H%M%S).log"
+set -o pipefail
+python -m football_pose evaluate-coco configs/lyra-coco-keypoints.yaml 2>&1 | tee "$COCO_LOG"
+```
+
+Subset scores are not benchmark results. `validate-config` is for football configs,
+not this schema.
+
+**Find the newest COCO summary on Lyra:**
+
+```bash
+python - <<'PY'
+from pathlib import Path
+root = Path('/mnt/storage2/vincent/football-pose/results/coco-keypoints')
+paths = list(root.glob('*/summary.json'))
+if not paths:
+    raise SystemExit('No COCO summary found.')
+path = max(paths, key=lambda p: p.stat().st_mtime)
+print('Summary:', path)
+print(path.read_text())
+for log in sorted(path.parent.glob('model-*/coco-evaluation.txt')):
+    print('\nMetrics:', log)
+    print(log.read_text())
+PY
+```
+
+Each run contains `summary.json` and `model-00/`, `model-01/` metric
+reports/predictions. Confirm model IDs, completion and image count. Download the
+desired run from the Mac with `scp -r vincent@lyra:/absolute/run/directory /Users/larry/Downloads/`.
+
+## 8. First-time setup and updates
+
+Skip completed steps. The existing server environment should not be recreated
+for every experiment.
+
+### Clone and create the venv (Lyra, once)
 
 ```bash
 mkdir -p /home/vincent/projects
 cd /home/vincent/projects
-
-git clone \
-  --branch codex/modular-football-pipeline \
-  --single-branch \
+git clone --branch codex/modular-football-pipeline --single-branch \
   https://github.com/vin1penny/Bremen.git
-
 cd /home/vincent/projects/Bremen
-git status --short --branch
-git log -1 --oneline
+python3.12 -m venv .venv
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
 ```
 
-All project commands below assume this repository root is the current directory:
+### Create storage and install host dependencies (Lyra)
+
+```bash
+umask 077
+mkdir -p /home/vincent/football-pose-private/{checkpoints,configs}
+mkdir -p /home/vincent/football-pose-cache/{artifacts,pitch}
+mkdir -p /home/vincent/.cache/football-pose/{pip-tmp,ultralytics}
+mkdir -p /home/vincent/.cache/pip
+mkdir -p /mnt/storage2/vincent/football-pose/videos/{input,output}
+mkdir -p /mnt/storage2/vincent/football-pose/datasets/{coco,pitch}
+mkdir -p /mnt/storage2/vincent/football-pose/cache/coco
+mkdir -p /mnt/storage2/vincent/football-pose/results/{football,coco-keypoints,pitch-training,pitch-validation,logs}
+export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
+export PIP_CACHE_DIR=/home/vincent/.cache/pip
+export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
+python -m pip install --upgrade pip
+python -m pip install --resume-retries 20 -r requirements/orchestrator.txt
+python -m pip install --resume-retries 20 -r requirements/dev.txt
+python -m pip install -r requirements/evaluation.txt
+python -m pip check
+python -m pytest -q
+```
+
+The host handles preprocessing, pitch inference, archives, evaluation and rendering.
+Containers isolate person-pose model runtimes. Checkpoint architecture is separate
+from the installed Ultralytics library version.
+
+### Build model containers (Lyra, repo root)
+
+```bash
+docker build -f containers/Dockerfile.yolo -t vincent/football-pose-yolo:dev .
+docker build -f containers/Dockerfile.yolo26 -t vincent/football-pose-yolo26:dev .
+docker build --build-arg BUILD_JOBS=8 \
+  -f containers/Dockerfile.openpose -t vincent/football-pose-openpose:dev .
+docker image ls --filter 'reference=vincent/football-pose-*'
+docker run --rm vincent/football-pose-yolo26:dev --help
+docker run --rm vincent/football-pose-openpose:dev --help
+```
+
+YOLO26 builds on the base YOLO image, so build in that order. OpenPose intentionally
+clones a pinned CMU source revision and compiles Caffe/OpenPose with cuDNN; this
+can take time. BODY_25 weights are supplied separately and inherit OpenPose's
+non-commercial license.
+
+The HRNet image and its separate pose-weight download are in section 4; build that
+image too before running the default three-model screen.
+
+Rebuild when container dependencies/native code change. The wrapper mounts the
+current repo, so host code/config/checkpoint-only changes generally do not need
+a rebuild. With a GPU selected, verify the YOLO26 container can see it:
+
+```bash
+docker run --rm --gpus "device=${CUDA_VISIBLE_DEVICES}" \
+  --entrypoint python3 vincent/football-pose-yolo26:dev \
+  -c 'import torch; print(torch.cuda.is_available(), torch.cuda.device_count(), torch.cuda.get_device_name(0))'
+```
+
+### Get missing person-pose weights (Lyra)
+
+Only download if absent; do not overwrite selected pitch weights.
+
+```bash
+cd /home/vincent/football-pose-private/checkpoints
+test -f yolo26x-pose.pt || curl -fL --retry 3 -o yolo26x-pose.pt \
+  https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26x-pose.pt
+test -f pose_iter_584000.caffemodel || curl -fL --retry 3 -o pose_iter_584000.caffemodel \
+  'https://huggingface.co/camenduru/openpose/resolve/f5bb0c0a16060ac8b373472a5456c76bd68eb202/models/pose/body_25/pose_iter_584000.caffemodel?download=true'
+sha256sum yolo26x-pose.pt pose_iter_584000.caffemodel
+cd /home/vincent/projects/Bremen
+```
+
+Expected BODY_25 SHA-256:
+`44e3d7ebd8c8b62d4366d67127f1b562611a9e8fd0f4f3cdeeb4bb4a6ed12be6`.
+Use the selected trained pitch checkpoint from section 6, not generic COCO weights.
+
+### Update existing code (Lyra, before starting jobs)
 
 ```bash
 cd /home/vincent/projects/Bremen
-```
-
-## 3. Update an existing server clone
-
-Before pulling, inspect local work:
-
-```bash
-cd /home/vincent/projects/Bremen
 git status --short --branch
 ```
 
-If the worktree is clean:
+Inspect local changes first, including server GPU edits. If the worktree is clean:
 
 ```bash
 git switch codex/modular-football-pipeline
 git pull --ff-only
 ```
 
-Do not discard, overwrite, or stash unfamiliar server changes. Commit intentional work or inspect it before pulling.
+Activate the venv again; install changed requirements/rebuild changed containers
+when needed. Do not discard unfamiliar changes or pull while a job is running.
 
-## 4. Create the server storage layout
+## 9. Quick troubleshooting
 
-Keep private and durable data outside the Git clone. This reduces the risk of
-committing footage, weights, secrets, or large results. Large input and rendered
-output videos use the approved NFS storage mounted from
-`141.23.38.152:/raid0_ssd2`; source code, checkpoints, caches, and prediction files
-remain in their existing home locations.
+| Problem | What to check / do |
+| --- | --- |
+| Python 2.7 syntax error / no `football_pose` | Activate repo venv, set `PYTHONPATH="$PWD/src"`; verify `which python` |
+| GPU outside reservation | Match shell export, every model's physical devices and pitch device |
+| OpenPose OOM at batch 1 | Check free VRAM/processes, use an available permitted GPU; reducing clip length does not reduce single-frame memory |
+| Pip fills `/tmp` | Set `TMPDIR` / pip cache from section 1 before installing |
+| Docker permission denied | Ask administrator about Docker access; do not change shared daemon permissions |
+| SSH key too open | On Mac: `chmod 600 /Users/larry/.ssh/lsi_gpu_rsa` |
+| SSH invalid key format | Check the actual key file; this is not fixed by entering its passphrase |
+| SSH disconnect | Reconnect and attach tmux; do not restart blindly |
+| Missing results/video | Check config's `output_dir`, latest summary status and `outputs.video` |
 
-```bash
-mkdir -p /home/vincent/football-pose-private/checkpoints
-mkdir -p /home/vincent/football-pose-private/configs
-mkdir -p /home/vincent/football-pose-results
-mkdir -p /home/vincent/football-pose-cache/artifacts
-mkdir -p /home/vincent/.cache/football-pose/pip-tmp
-mkdir -p /home/vincent/.cache/football-pose/ultralytics
-chmod 700 /home/vincent/football-pose-private
-
-FOOTBALL_VIDEO_ROOT=/mnt/storage2/vincent/football-pose/videos
-umask 077
-mkdir -p "$FOOTBALL_VIDEO_ROOT/input" "$FOOTBALL_VIDEO_ROOT/output"
-chmod 700 \
-  /mnt/storage2/vincent \
-  /mnt/storage2/vincent/football-pose \
-  "$FOOTBALL_VIDEO_ROOT" \
-  "$FOOTBALL_VIDEO_ROOT/input" \
-  "$FOOTBALL_VIDEO_ROOT/output"
-```
-
-The mounted video directories were verified on 2026-09-03 as owned by
-`vincent:vincent`, mode `700`, and writable. At verification time `/mnt/storage2`
-had about 20 TB available. Recheck before large transfers. The remote source path
-contains `raid0`; unless the administrator explicitly confirms backups, treat it as
-working storage rather than the only copy of irreplaceable footage.
-
-Creating `/lyra/cache/vincent/...` currently fails with `Permission denied`. Use the
-home-based cache above until an administrator provisions a writable directory on
-`/lyra/cache`; then update experiment YAML explicitly. The home fallback avoids the
-nearly full root filesystem, but it is not proof that the data is backed up.
-
-| Data                            | Location                                          | Git-backed? | Regenerable?           |
-| ------------------------------- | ------------------------------------------------- | ----------- | ---------------------- |
-| Source code and experiment YAML | `/home/vincent/projects/Bremen`                   | Yes         | Yes                    |
-| Large input videos              | `/mnt/storage2/vincent/football-pose/videos/input` | No          | Usually no             |
-| Rendered/output videos          | `/mnt/storage2/vincent/football-pose/videos/output` | No         | Usually reproducible   |
-| Unique checkpoints              | `/home/vincent/football-pose-private/checkpoints` | No          | Usually no             |
-| Parquet, manifests, logs        | `/home/vincent/football-pose-results`             | No          | Expensive to reproduce |
-| Preprocessed artifacts          | `/home/vincent/football-pose-cache/artifacts`     | No          | Yes                    |
-
-Check space before large jobs:
+For a failed model, use its **exact job ID** from the summary:
 
 ```bash
-df -h / /tmp /home/vincent /lyra /mnt/storage2
-df -i / /tmp /home/vincent /lyra /mnt/storage2
-docker system df
+JOB_DIR=/home/vincent/football-pose-results/native-resolution/openpose-full-frame/jobs/da9bd668692800b6fdf5077a
+find "$JOB_DIR/runner" -type f -name '*.log' -print
+tail -n 100 "$JOB_DIR"/runner/attempt-*/shard-*.log
 ```
 
-The `quota` command is not installed on Lyra. Ask the administrator about any
-account or ZFS quota that is not visible through `df`.
-
-Never run `docker system prune` on the shared Docker installation.
-
-## 5. Transfer footage and checkpoints
-
-Run `scp` from the Mac, not from inside the Lyra SSH session. Examples:
-
-```bash
-scp /local/path/test-video.mp4 \
-  vincent@lyra:/mnt/storage2/vincent/football-pose/videos/input/
-
-scp /local/path/player.pt \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-
-scp /local/path/yolov8x-pose.pt \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-
-scp /local/path/hrnet-w32.pth \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-```
-
-Verify on Lyra:
-
-```bash
-ls -lh /mnt/storage2/vincent/football-pose/videos/input
-ls -lh /home/vincent/football-pose-private/checkpoints
-sha256sum /home/vincent/football-pose-private/checkpoints/*
-```
-
-To copy the existing 30-second sample from the repository into mounted storage,
-preserve the original until both hashes match:
-
-```bash
-cp -v \
-  /home/vincent/projects/Bremen/footage/sample_30.mov \
-  /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
-
-sha256sum \
-  /home/vincent/projects/Bremen/footage/sample_30.mov \
-  /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
-```
-
-All tracked Lyra experiment YAML files read `sample_30.mov` from the mounted input
-directory. Do not remove the original copy until configuration validation and one
-experiment run succeed against the mounted file.
-
-The pipeline writes JSONL, Parquet, manifests, summaries, and logs under
-`/home/vincent/football-pose-results`. Every tracked Lyra experiment also renders one
-annotated MP4 per model under
-`/mnt/storage2/vincent/football-pose/videos/output`. The exact MP4 path is recorded as
-`jobs[].outputs.video` in `summary.json` and `job.json`.
-
-Do not put secrets, private footage, or unique weights into Git. The modular inference pipeline does not need a Roboflow API key unless a separate training or Roboflow notebook is used.
-
-The YOLO Pose checkpoint already present in the Mac clone can be transferred with:
-
-```bash
-scp /Users/larry/Bremen/FootballTrackingDataGeneration-main/train/yolov8x-pose.pt \
-  vincent@lyra:/home/vincent/football-pose-private/checkpoints/
-```
-
-## 6. Create the Python environment
-
-On Lyra, from the repository root:
-
-```bash
-cd /home/vincent/projects/Bremen
-python3.12 -m venv .venv
-source .venv/bin/activate
-
-export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
-export PIP_CACHE_DIR=/home/vincent/.cache/pip
-export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
-
-python -m pip install --upgrade pip
-python -m pip install --resume-retries 20 -r requirements/dev.txt
-
-export PYTHONPATH="$PWD/src"
-```
-
-Install the smaller development environment first and run the CPU checks in the
-next section. Only after those pass, install the heavier host dependencies used by
-crop detection and model orchestration:
-
-```bash
-python -m pip install --resume-retries 20 -r requirements/orchestrator.txt
-python -m pip check
-```
-
-PyTorch is a roughly 906 MB download. `TMPDIR` must not point at `/tmp`, because
-`/tmp` is on the nearly full root filesystem. `--resume-retries 20` makes an
-interrupted download retry without changing package versions.
-
-Reactivate this environment after reconnecting:
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
-export PIP_CACHE_DIR=/home/vincent/.cache/pip
-export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
-```
-
-Activating `.venv` selects the project interpreter, but it does not automatically add
-the repository's `src/` directory to Python's import path. Both `source` and the
-`PYTHONPATH` export are therefore required after every new SSH login. Confirm them
-before running tests or experiments:
-
-```bash
-which python
-echo "$PYTHONPATH"
-python -c "import football_pose; print(football_pose.__file__)"
-```
-
-The expected values begin with:
-
-```text
-/home/vincent/projects/Bremen/.venv/bin/python
-/home/vincent/projects/Bremen/src
-/home/vincent/projects/Bremen/src/football_pose/__init__.py
-```
-
-If Python reports `No module named football_pose`, return to the repository root and
-set `PYTHONPATH` again:
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-```
-
-Do not use `pip install -e .` for this repository. It currently has no `pyproject.toml`
-or `setup.py`; `football_pose` is loaded directly from `src/` through `PYTHONPATH`.
-
-## 7. Run the safe CPU checks
-
-These commands do not require a GPU reservation:
-
-```bash
-python -m pip check
-python -m pytest -q
-python -m football_pose list-processors
-python -m football_pose validate-config configs/mock.yaml
-python -m football_pose run configs/mock.yaml
-python -m football_pose run configs/mock.yaml
-```
-
-Expected unit-test result after pulling the deterministic-tiling update:
-
-```text
-29 passed
-```
-
-The earlier server run on the preceding revision passed all 16 tests. Its cold mock
-run processed 782 frames successfully, and the second run reported
-`"cache_hit": true` with about 0.067 seconds of preprocessing wall time. This checks
-video decoding, preprocessing, caching, runner orchestration, validation, Parquet
-output, and resume behavior without using CUDA.
-
-## 8. Build and verify the YOLO container
-
-Docker packages the YOLO runner, CUDA runtime, Python, and pinned libraries into one
-reproducible image. The host orchestrator remains in `.venv`; it launches the image
-through `runners/container-runner.sh` and mounts only the required artifact,
-checkpoint, output directory, and repository.
-
-Container builds do not require a GPU reservation, but they use CPU, network, shared
-Docker storage, and time. Prefix image names with the Lyra username so they do not
-collide with another user's images.
-
-```bash
-docker build \
-  -f containers/Dockerfile.yolo \
-  -t vincent/football-pose-yolo:dev .
-```
-
-This image has already built successfully on Lyra. The Python 3.10 container uses
-NumPy 2.2.6 because NumPy 2.3+ requires Python 3.11; the version marker is tested in
-the repository. Do not build HRNet or OpenPose yet. First complete the YOLO hardware
-smoke test below.
-
-Verify the image without reserving a GPU:
-
-```bash
-docker image ls vincent/football-pose-yolo
-
-docker run --rm \
-  --entrypoint python3 \
-  vincent/football-pose-yolo:dev \
-  -c "import torch, ultralytics, cv2, av; print('torch:', torch.__version__); print('ultralytics:', ultralytics.__version__); print('opencv:', cv2.__version__); print('pyav:', av.__version__)"
-
-docker run --rm vincent/football-pose-yolo:dev --help
-```
-
-Both checks have passed on Lyra. Ultralytics may say that `/root/.config` is not
-writable and use `/tmp/Ultralytics` inside the disposable container. That warning is
-harmless for this runner because each container is removed after its shard finishes.
-
-## 9. Follow the shared GPU reservation policy
-
-Before every GPU command:
-
-1. Read the shared semaphore/reservation document.
-2. Check current GPU state with `nvidia-smi`.
-3. Record `vincent`, the physical GPU IDs, and the expected duration in the semaphore.
-4. Export exactly the reserved physical IDs through `CUDA_VISIBLE_DEVICES`.
-5. Put the same physical IDs in every selected model's YAML `devices` list.
-6. Release the reservation when the command finishes or fails.
-
-An apparently idle GPU in `nvidia-smi` is not permission to use it. The semaphore is authoritative.
-
-Because `nvitop` is not installed, monitor with:
-
-```bash
-watch -n 2 nvidia-smi
-```
-
-Also monitor host resources:
-
-```bash
-free -h
-df -h / /tmp /home/vincent /lyra
-```
-
-## 10. Prepare the tracked YOLO-only smoke test
-
-Pull the current branch, then copy the tracked smoke template outside the repository
-so inserting the reserved GPU ID does not create a Git change:
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-
-cp configs/lyra-yolo-one-gpu.yaml \
-  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
-```
-
-The template deliberately tests only YOLO Pose with the tracked 30-second sample,
-`resize`, and `clahe`. It does not enable crop detection, HRNet, or OpenPose. This
-isolates the first real model and reuses the two preprocessing stages already proven
-by the CPU mock run.
-
-Confirm the checkpoint exists:
-
-```bash
-ls -lh /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
-sha256sum /home/vincent/football-pose-private/checkpoints/yolov8x-pose.pt
-```
-
-Validate and materialize the lossless artifact. These commands are CPU-only because
-this configuration has no `crop` processor, so they do not require a GPU
-reservation:
-
-```bash
-python -m football_pose validate-config \
-  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
-
-python -m football_pose run \
-  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml \
-  --prepare-only
-```
-
-Expect `"success": true`, 782 frames, and an FFV1 artifact path under
-`/home/vincent/football-pose-cache/artifacts`.
-
-## 11. Reserve one GPU and set the same ID in both places
-
-Follow the semaphore procedure in section 9. After a physical GPU is assigned, edit
-the private YAML:
-
-```bash
-nano /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml
-```
-
-Replace the placeholder with the assigned physical ID. For example only, if the
-semaphore assigned GPU 2:
-
-```yaml
-devices: [2]
-```
-
-Export the identical ID in the shell:
-
-```bash
-export CUDA_VISIBLE_DEVICES=2
-```
-
-The example ID is not a recommendation. Do not continue unless it is the GPU actually
-assigned in the shared semaphore.
-
-Confirm that Docker can see exactly one A100:
-
-```bash
-docker run --rm \
-  --gpus "device=${CUDA_VISIBLE_DEVICES}" \
-  --entrypoint python3 \
-  vincent/football-pose-yolo:dev \
-  -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('visible GPUs:', torch.cuda.device_count()); print('GPU 0:', torch.cuda.get_device_name(0))"
-```
-
-Expected essentials:
-
-- `CUDA available: True`
-- `visible GPUs: 1`
-- `GPU 0: NVIDIA A100-SXM4-40GB`
-
-If this fails, release the reservation after diagnosis and do not start inference.
-
-## 12. Run YOLO Pose on the short artifact
-
-Run from the repository root while the reservation and export are still active:
-
-```bash
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
-export PIP_CACHE_DIR=/home/vincent/.cache/pip
-export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
-
-python -m football_pose run \
-  /home/vincent/football-pose-private/configs/lyra-yolo-one-gpu.yaml \
-  --model yolo-pose
-```
-
-Open a second SSH session to monitor the reserved GPU:
-
-```bash
-watch -n 2 nvidia-smi
-```
-
-The initial batch is 8. If a CUDA OOM occurs, the orchestrator automatically retries
-the complete YOLO attempt with batches 4, 2, and then 1.
-
-The smoke test passes only when all of these are true:
-
-- The command exits with code 0.
-- The summary reports `"success": true` and `"cache_hit": true`.
-- The YOLO job reports `"status": "COMPLETE"`.
-- `predictions.parquet` and `manifest.json` exist.
-- The runner stderr log has no unexplained exception.
-
-This is an infrastructure pass. A `COMPLETE` job with `records: "0"` proves the
-container and archive contract, but it is not a useful pose result. The first Lyra
-run completed this contract and produced zero records because the wide frame reached
-YOLO at its default 640-pixel inference size.
-
-Inspect the output without guessing its generated job ID:
-
-```bash
-find /home/vincent/football-pose-results/yolo-one-gpu-smoke \
-  -type f \
-  -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
-  | sort
-```
-
-Release the semaphore reservation immediately after the run finishes or fails.
-
-## 13. Compare full-frame YOLO with deterministic tiling
-
-Pull the tiling implementation and rebuild the YOLO image. Docker should reuse the
-large dependency layers:
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-
-docker build \
-  -f containers/Dockerfile.yolo \
-  -t vincent/football-pose-yolo:dev .
-```
-
-The two tracked configurations keep the video, official checkpoint, inference size,
-confidence, batch, and GPU constant. Their only image-input difference is the `tile`
-processor:
-
-```bash
-python -m football_pose validate-config configs/lyra-yolo-full-frame.yaml
-python -m football_pose validate-config configs/lyra-yolo-tiled.yaml
-```
-
-After reserving the configured GPU and exporting the same ID, run:
-
-```bash
-python -m football_pose run configs/lyra-yolo-full-frame.yaml
-python -m football_pose run configs/lyra-yolo-tiled.yaml
-```
-
-The full-frame baseline uses the original 1920 x 1080 frames but fixes YOLO inference
-at 640. The tiled run uses a 2 x 2 grid with 10% overlap and the same 640 inference
-size. Compare the record count, model time, and logs. Overlap duplicates remain
-identified by tile ID; they will be fused in original-frame coordinates before final
-metrics.
-
-The observed result was 0 YOLO pose records for 782 full frames and 451 raw records
-for 3,128 tiles. Tiling therefore helped, but the upper-bound player-instance recall
-is below 3% when at least 20 players are visible per frame. It is not sufficient as
-the final pipeline.
-
-## 14. Compare full-frame OpenPose with deterministic tiling
-
-OpenPose is bottom-up and can run on the same two inputs without external boxes. Build
-it after the YOLO comparison has been reviewed. The image compiles OpenPose from the
-pinned source commit without downloading model weights during the build. It does not
-require a GPU reservation. By default the Dockerfile uses eight compiler jobs rather
-than all 64 server CPUs:
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-
-docker build \
-  --build-arg BUILD_JOBS=8 \
-  -f containers/Dockerfile.openpose \
-  -t vincent/football-pose-openpose:dev .
-
-docker run --rm vincent/football-pose-openpose:dev --help
-```
-
-The standard BODY_25 weight is a separate private-server input so its checksum is
-recorded with each job. OpenPose's legacy CMU model host is currently unavailable.
-Download the file directly on Lyra from this commit-pinned Hugging Face mirror. The
-mirror file was verified against the MD5 embedded in OpenPose v1.7.0 and against its
-published SHA-256:
-
-```bash
-mkdir -p /home/vincent/football-pose-private/checkpoints
-
-curl --fail --location --retry 20 \
-  --output /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel \
-  'https://huggingface.co/camenduru/openpose/resolve/f5bb0c0a16060ac8b373472a5456c76bd68eb202/models/pose/body_25/pose_iter_584000.caffemodel?download=true'
-```
-
-Verify the file on Lyra. The MD5 value pinned by OpenPose v1.7.0 is shown below; the
-experiment manifest additionally records SHA-256:
-
-```bash
-md5sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
-sha256sum /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
-```
-
-Expected hashes:
-
-```text
-MD5     78287b57cf85fa89c03f1393d368e5b7
-SHA-256 44e3d7ebd8c8b62d4366d67127f1b562611a9e8fd0f4f3cdeeb4bb4a6ed12be6
-```
-
-Delete and download the file again if either hash differs. Do not use an unverified
-checkpoint in an experiment.
-
-Validate the matched configurations:
-
-```bash
-python -m football_pose validate-config configs/lyra-openpose-full-frame.yaml
-python -m football_pose validate-config configs/lyra-openpose-tiled.yaml
-```
-
-Both configurations fix BODY_25 network resolution at `-1x368` and currently use
-physical GPU 7 as their default. After reserving GPU 7 in the shared semaphore,
-run them serially:
-
-```bash
-export CUDA_VISIBLE_DEVICES=7
-
-python -m football_pose run configs/lyra-openpose-full-frame.yaml
-python -m football_pose run configs/lyra-openpose-tiled.yaml
-```
-
-They reuse the existing full-frame and tiled artifacts when the source video and
-preprocessing implementation are unchanged. Compare raw records and runtime, while
-remembering that overlapping-tile records have not yet been deduplicated.
-
-Do not use a full-frame HRNet run to judge whether HRNet is better at finding players.
-HRNet-W32 is top-down and requires a person box. Its first valid test comes after a
-fixed detector/tracker has produced the shared crop artifact used by all three pose
-models. The complete experiment structure is defined in `experiment.md`.
-
-## 15. Screen other full-frame preprocessing methods
-
-Pull the preprocessing-screen configurations and verify the CPU contracts before
-reserving a GPU:
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-
-python -m pytest -q
-
-for config in configs/lyra-preprocess-*.yaml
-do
-  python -m football_pose validate-config "$config"
-done
-```
-
-The expected test result for this revision is `49 passed`. The four configurations
-each apply exactly one full-frame preprocessing change: CLAHE, gamma 0.8, gamma 1.2,
-or mild unsharp masking. Every configuration materializes one lossless artifact and
-then runs YOLO Pose followed by OpenPose with unchanged model settings. No container
-rebuild is required because these processors run in the host orchestrator.
-
-After confirming and reserving physical GPU 7 in the shared semaphore, start the
-screen inside `tmux`:
-
-```bash
-tmux new -s preprocessing-screen
-
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export CUDA_VISIBLE_DEVICES=7
-
-for config in \
-  configs/lyra-preprocess-clahe.yaml \
-  configs/lyra-preprocess-gamma-darken.yaml \
-  configs/lyra-preprocess-gamma-brighten.yaml \
-  configs/lyra-preprocess-unsharp.yaml
-do
-  python -m football_pose run "$config"
-done
-```
-
-Detach with `Ctrl-b`, then `d`; reconnect with `tmux attach -t preprocessing-screen`.
-Do not add tiling to these first screening runs: each result must remain attributable
-to one isolated preprocessing step. Release GPU 7 after the loop completes or fails.
-
-### Run all current native-resolution comparisons and render videos
-
-First pull the visualization code and validate it. The renderer runs in the host
-orchestrator, so the YOLO and OpenPose Docker images do not need to be rebuilt.
-
-```bash
-cd /home/vincent/projects/Bremen
-git pull --ff-only
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-
-python -m pytest -q
-
-for config in \
-  configs/lyra-yolo-full-frame.yaml \
-  configs/lyra-openpose-full-frame.yaml \
-  configs/lyra-yolo-tiled.yaml \
-  configs/lyra-openpose-tiled.yaml \
-  configs/lyra-preprocess-clahe.yaml \
-  configs/lyra-preprocess-gamma-darken.yaml \
-  configs/lyra-preprocess-gamma-brighten.yaml \
-  configs/lyra-preprocess-unsharp.yaml
-do
-  python -m football_pose validate-config "$config"
-done
-```
-
-After reserving GPU 7 and confirming it is still available, start a persistent run:
-
-```bash
-tmux new -s native-video-experiment
-
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export CUDA_VISIBLE_DEVICES=7
-
-RUN_LOG=/home/vincent/football-pose-results/native-resolution/full-run.log
-
-for config in \
-  configs/lyra-yolo-full-frame.yaml \
-  configs/lyra-openpose-full-frame.yaml \
-  configs/lyra-yolo-tiled.yaml \
-  configs/lyra-openpose-tiled.yaml \
-  configs/lyra-preprocess-clahe.yaml \
-  configs/lyra-preprocess-gamma-darken.yaml \
-  configs/lyra-preprocess-gamma-brighten.yaml \
-  configs/lyra-preprocess-unsharp.yaml
-do
-  python -m football_pose run "$config" 2>&1 | tee -a "$RUN_LOG"
-done
-
-python -m football_pose build-overview \
-  /home/vincent/football-pose-results/native-resolution
-```
-
-Detach with `Ctrl-b`, then `d`. Reattach with
-`tmux attach -t native-video-experiment`. Rerunning an unchanged completed job reuses
-its prediction archive and any existing video; if only its MP4 is missing, the
-pipeline recreates the MP4 without rerunning model inference.
-
-Compare each model's record count and model runtime against its full-frame baseline.
-Do not promote a step into a tiled or combined pipeline until its predictions have
-also passed visual inspection and overlapping-tile results have been deduplicated.
-
-## 16. Later: run the full serial, multi-GPU experiment
-
-Only continue after the staged one-GPU tests pass.
-
-1. Copy the one-GPU YAML to a new, descriptive full-run YAML.
-2. Change the input and output paths.
-3. Reserve the intended physical GPUs in the semaphore.
-4. Put exactly those IDs in every model's `devices` list.
-5. Export the identical comma-separated IDs.
-6. Start the run inside `tmux` so an SSH disconnect does not stop it.
-
-Example only, assuming GPUs 2, 3, 4, and 5 were explicitly reserved:
-
-```bash
-tmux new -s thesis-pose
-
-cd /home/vincent/projects/Bremen
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export CUDA_VISIBLE_DEVICES=2,3,4,5
-
-python -m football_pose run configs/server-full-run.yaml
-```
-
-Detach from `tmux` with `Ctrl-b`, then `d`. Reconnect later with:
-
-```bash
-tmux attach -t thesis-pose
-```
-
-The orchestrator runs YOLO Pose, HRNet-W32, and OpenPose serially. Within each model, work is sharded across all configured GPUs. CUDA out-of-memory failures automatically restart the complete model attempt with half the batch size until `min_batch_size` is reached.
-
-## 17. Find outputs and logs
-
-For the suggested external results root:
-
-```text
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/predictions.parquet
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/archive/manifest.json
-/home/vincent/football-pose-results/EXPERIMENT/jobs/JOB_ID/runner/
-/home/vincent/football-pose-results/EXPERIMENT/experiments/EXPERIMENT_ID/summary.json
-/mnt/storage2/vincent/football-pose/videos/output/CONFIGURATION/EXPERIMENT_ID/*.mp4
-```
-
-List recent outputs:
-
-```bash
-find /home/vincent/football-pose-results -type f -printf '%TY-%Tm-%Td %TH:%TM %p\n' \
-  | sort -r \
-  | head -50
-```
-
-List the generated review videos:
-
-```bash
-find /mnt/storage2/vincent/football-pose/videos/output \
-  -type f -name '*.mp4' -printf '%TY-%Tm-%Td %TH:%TM %10s %p\n' \
-  | sort -r
-```
-
-Inspect a cached artifact using the path printed by the preparation command:
-
-```bash
-python -m football_pose inspect-artifact \
-  /home/vincent/football-pose-cache/artifacts/ARTIFACT_ID \
-  --count-frames
-```
-
-Copy important results back to the Mac from the Mac Terminal:
-
-```bash
-scp -r \
-  vincent@lyra:/home/vincent/football-pose-results/EXPERIMENT \
-  /local/backup/destination/
-
-scp -r \
-  vincent@lyra:/mnt/storage2/vincent/football-pose/videos/output/CONFIGURATION \
-  /local/backup/destination/
-```
-
-## 18. Save server-side code changes
-
-Before editing:
-
-```bash
-cd /home/vincent/projects/Bremen
-git status --short --branch
-git pull --ff-only
-```
-
-After editing, review and commit only intended files:
-
-```bash
-git status --short
-git diff
-git add PATH_TO_FILE
-git commit -m "Describe the change"
-git push
-```
-
-Never use `git add .` when private data or generated outputs may be present. Never commit model weights, source footage, secrets, cache artifacts, Parquet results, or runner logs.
-
-## 19. Daily start and finish checklist
-
-At the start:
-
-```bash
-ssh vincent@lyra
-cd /home/vincent/projects/Bremen
-git status --short --branch
-git pull --ff-only
-source .venv/bin/activate
-export PYTHONPATH="$PWD/src"
-export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
-export PIP_CACHE_DIR=/home/vincent/.cache/pip
-export YOLO_CONFIG_DIR=/home/vincent/.cache/football-pose/ultralytics
-```
-
-Before GPU work:
-
-- Check and update the semaphore.
-- Export only reserved physical GPU IDs.
-- Confirm YAML `devices` contains the same IDs.
-- Confirm output and cache free space.
-- Start with the smallest reproducible input.
-
-At the end:
-
-- Confirm results and manifests exist.
-- Copy irreplaceable results to backed-up storage.
-- Release all GPU reservations, including after a failure.
-- Commit and push intended source/configuration changes.
-- Leave cache and shared Docker storage intact unless the administrator authorizes cleanup.
-
-## Troubleshooting
-
-### `Permission denied` during SSH
-
-Check the username, VPN, password, SSH key, and whether Lyra requires a specific domain name.
-
-### `docker info` reports a permission error
-
-Do not use `sudo` as a workaround. Ask the administrator for the supported Docker or Apptainer workflow.
-
-### `No space left on device` while pip downloads PyTorch
-
-Confirm `tempfile.gettempdir()` is not `/tmp`, then retry with the home-based
-temporary directory:
-
-```bash
-export TMPDIR=/home/vincent/.cache/football-pose/pip-tmp
-export PIP_CACHE_DIR=/home/vincent/.cache/pip
-python -c "import tempfile; print(tempfile.gettempdir())"
-python -m pip install --resume-retries 20 -r requirements/orchestrator.txt
-```
-
-Do not delete shared Docker data to solve a pip temporary-file problem.
-
-### Ultralytics says its config directory is not writable
-
-For the host environment, export the user-owned directory documented in section 6.
-The same warning inside a disposable YOLO container is harmless because it falls back
-to `/tmp/Ultralytics`.
-
-### YOLO image build cannot install `numpy==2.3.5`
-
-Pull commit `677cec8` or later. The CUDA Ubuntu 22.04 image has Python 3.10 and must
-select the conditional NumPy 2.2.6 pin from `requirements/yolo.txt`.
-
-### GPU reservation error from the orchestrator
-
-The physical IDs in YAML do not match `CUDA_VISIBLE_DEVICES`. Compare both with the semaphore reservation.
-
-### CUDA out of memory
-
-The runner automatically halves its batch size. If it reaches the minimum, reduce the configured starting batch or test on a shorter input. Do not take another GPU without reserving it.
-
-### Low GPU utilization
-
-Check CPU use, RAM, swap, `/lyra` free space, and artifact I/O. Preprocessing or storage may be starving the model.
-
-### Interrupted SSH session
-
-Use `tmux` for long runs. Completed jobs and artifacts are resumable; rerun the same validated configuration rather than deleting outputs.
-
-### Stale cache lock
-
-First confirm that no process is writing that exact artifact. Do not delete lock files merely because a job is slow. If the original process is confirmed dead, record the exact error before carefully removing only the corresponding stale lock.
-
-## Related project documentation
-
-- [README.md](README.md) - project setup and modular-pipeline overview
-- [experiment.md](experiment.md) - experiment stages, comparisons, and fairness rules
-- [docs/architecture.md](docs/architecture.md) - contracts, artifacts, recovery, and GPU scheduling
-- [configs/lyra-yolo-full-frame.yaml](configs/lyra-yolo-full-frame.yaml) - full-frame YOLO tiling baseline
-- [configs/lyra-yolo-tiled.yaml](configs/lyra-yolo-tiled.yaml) - matched deterministic-tiling YOLO run
-- [configs/lyra-openpose-full-frame.yaml](configs/lyra-openpose-full-frame.yaml) - full-frame OpenPose baseline
-- [configs/lyra-openpose-tiled.yaml](configs/lyra-openpose-tiled.yaml) - matched deterministic-tiling OpenPose run
-- [configs/lyra-yolo-one-gpu.yaml](configs/lyra-yolo-one-gpu.yaml) - tracked YOLO-only Lyra smoke-test template
-- [configs/server-three-models.yaml](configs/server-three-models.yaml) - tracked three-model configuration template
-- [TODOS.md](TODOS.md) - deferred evaluation work
-
-OpenPose retains its upstream academic/non-commercial licensing restrictions. Confirm the thesis use and any distribution of images, weights, or outputs complies with all third-party terms.
+That ID is an earlier failed run; replace it with the failed job you are inspecting.
+Never kill another user's process to free a GPU. Do not delete caches as a first fix.
+
+More detail: [experiment.md](experiment.md), [architecture](docs/architecture.md),
+[TODOs](TODOS.md).

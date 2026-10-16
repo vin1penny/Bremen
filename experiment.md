@@ -11,7 +11,10 @@ uses it too. New football outputs have separate `yolo26-*` directories on the
 mounted storage, preserving YOLOv8 pilot results. Compare processing steps
 against the **YOLO26 full-frame baseline**, not an older YOLOv8 run.
 
-The pitch-landmark model deliberately keeps its validated YOLOv8n Pose weights.
+The auxiliary pitch detector has 32 landmarks and uses the existing
+`pitch-landmarks-best.pt` path. The supplied PitchVision YOLOv8x weights were
+uploaded for evaluation, but their version-15 validation failed to match the
+previous YOLOv8n checkpoint; they are not an accepted production upgrade.
 It is an auxiliary geometry model, not one of the compared person-pose models.
 It runs on the original video frames under the same checkpoint and settings for
 every compared pose model and preprocessing condition. There is **no need to
@@ -19,6 +22,57 @@ retrain the pitch model** for the YOLO26 person-pose migration. Learned cropping
 is separate again: it needs a validated player-detector checkpoint before use.
 OpenPose and HRNet remain independent model families.
 The pitch-weight comparison YAML files remain historical checks of earlier weights.
+
+PitchVision checkpoint SHA-256:
+`28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36`.
+Its metadata records training on pitch dataset version 9 at 640 pixels. Use the
+existing Ultralytics pose validation operation on our version-15 validation set
+at 640 to measure its accuracy; this checkpoint is supplied already trained.
+Report pose mAP50 and mAP50–95, then inspect pitch landmarks and estimated
+boundaries on the experiment video. The high box scores visible in the supplied
+screenshot do not establish keypoint accuracy.
+
+The 2026-10-06 server recheck used the same version-15 validation set (34 images),
+640 input size and batch 2 for both checkpoints:
+
+| Pitch checkpoint | Pose mAP50 | Pose mAP50–95 |
+| --- | ---: | ---: |
+| Previous YOLOv8n, repeated validation | 0.984 | 0.605 |
+| Supplied PitchVision YOLOv8x | 0.162 | 0.0413 |
+
+These are checkpoint comparisons, not proof that the nano architecture is generally
+better. The supplied x checkpoint records version-9 training; our n checkpoint
+records version-15 training. The cause of the difference is not yet established.
+
+Next, fine-tune `pitch-v8n-reference.pt` on the existing version-15 training split
+(255 images) at 640, batch 8, for up to 100 additional epochs. Start a new optimizer
+cycle with AdamW and learning rate 0.0001, mosaic disabled, seed 0 and deterministic
+training. Early stopping patience is 20 under Ultralytics' validation-fitness
+criterion. Keep the candidate and logs on mounted storage without overwriting the
+reference or production weights. Validate the candidate at 640/batch 2, compare
+pose metrics with the reference, and inspect landmarks and boundaries on the same
+football video before promotion. The 28-image test split stays untouched until final
+evaluation. A subsequent x fine-tuning run should use the same dataset and evaluation
+protocol; more parameters or more epochs do not guarantee a better result.
+
+The completed 100-epoch nano fine-tuning run, saved as
+`pitch-v8n-finetune-6402`, reported pose mAP50 **0.995** and pose mAP50–95
+**0.844** on the 34 validation images. Keep this checkpoint as the comparison
+reference. The next candidate starts from that run's `weights/best.pt` for 20
+additional epochs at 640/batch 8, using AdamW with learning rate 0.00001 and the
+same dataset, seed and mosaic setting. The finished checkpoint has no optimizer
+state, so this is a new fine-tuning cycle, not exact optimizer-state resumption.
+Save separately and compare both candidates at 640/batch 2 before choosing one;
+more training can also reduce validation performance. Production remains unchanged.
+
+The additional 20 epochs were reported not to improve the candidate. Retain the
+100-epoch `pitch-v8n-finetune-6402/weights/best.pt` as the selected checkpoint for
+video review, installed through the existing `pitch-landmarks-best.pt` path.
+The next check is the complete full-frame OpenPose pipeline on the same sample
+video, including per-frame pitch landmarks, homography boundaries, pose filtering
+and the annotated MP4. Inspect alignment throughout camera movement, not only the
+validation-set score. Existing person-pose predictions can be reused; the pitch
+checkpoint hash invalidates the relevant geometry and video caches automatically.
 
 ## COCO model setup validation
 
@@ -50,8 +104,10 @@ and the existing BODY_25 → COCO-17 mapping. Canonical records now optionally
 retain `person_score`; COCO evaluation requires it rather than inventing scores.
 The initial comparison is YOLO 640/confidence 0.001/IoU 0.7 and OpenPose
 single-scale -1x368. These must be aligned with each reference's exact protocol
-before asserting that accuracy matches. HRNet remains pending an explicit
-detector/box protocol (ground-truth boxes and detected boxes are not equivalent).
+before asserting that accuracy matches. HRNet is not yet included in the COCO
+benchmark: its football runner uses our trained player detector, while any COCO
+reference comparison must specify its box protocol (ground-truth boxes and
+detected boxes are not equivalent).
 
 Execution success is not an accuracy pass. A reference score, split, checkpoint,
 input size, augmentation/NMS protocol and tolerance are needed for that decision.
@@ -114,7 +170,7 @@ The separate pitch-localization model is a trained football-pitch model. It is n
 pose model and does not change any pose estimate. It runs once per source video and
 settings combination, and its checkpoint hash and geometry cache ID are recorded in
 the experiment summary. This keeps crowd filtering identical across YOLO Pose,
-OpenPose, and later HRNet comparisons.
+OpenPose and HRNet comparisons.
 Active football configs run pitch landmark inference at `image_size: 640` on every
 original video frame, then map the predicted coordinates back to that frame for
 geometry fitting and rendering. This does not downscale the separate person-pose
@@ -133,7 +189,7 @@ Each frame now archives landmark IDs, pixel coordinates and confidence values.
 Magenta P0–P31 labels show predictions with confidence ≥0.5 independently of fit
 acceptance; the cyan polygon shows the fitted outer boundary.
 
-Pitch training followed `train/train_remote.ipynb` with a YOLOv8 backbone.
+Earlier pitch training followed `train/train_remote.ipynb` with a YOLOv8n backbone.
 `train/train_pitch_server.py` retains that backbone as its default if pitch
 training is ever repeated. The accepted checkpoint stays fixed during the
 YOLO26 person-pose comparisons. Preserve its hash and `pitch-validation.json`;
@@ -164,7 +220,8 @@ only as diagnostic metadata. Old rectangle-filter results are not valid pitch me
 Checkpoint correction: `models/pitch_detection_model_best/best.pt` was exported using
 box mAP as the selection criterion and failed the geometry checks on five sampled
 frames. `models/pitch_detection_model/weights/best.pt` passed those same five checks.
-Use the latter as `pitch-landmarks-best.pt` on Lyra. Its SHA-256 is
+This was the earlier `pitch-landmarks-best.pt` on Lyra, superseded by the
+PitchVision YOLOv8x replacement above. Its SHA-256 is
 `dd216396a9ba8461445e8ddfbafb98f3d9ed45fe99d48033725c85297bced2f3`.
 Full-video boundary accuracy and usable-frame coverage still need server validation;
 unavailable poses remain preserved in raw predictions.
@@ -244,65 +301,105 @@ is beneficial, tiled detector results will be projected to the source frame, dup
 boxes fused, and temporal tracking applied before the common crop artifact is created.
 We do not treat sequential per-tile tracker calls as independent video frames.
 
-### 4. Preprocessing search
+### 4. Single-step preprocessing screening
 
-Evaluate individual steps before testing combinations. Candidate steps include:
+Run `screen-preprocessing configs/lyra-preprocessing-screen.yaml --device GPU_ID`.
+The suite uses `lyra-preprocessing-base.yaml` for the shared input, pose models,
+pitch filter and rendering settings. It expands each condition to an ordinary
+experiment YAML: baseline has no processors; every other condition has exactly one.
 
-- resize or full-resolution input
-- CLAHE
-- gamma correction
-- NLM or bilateral denoising
-- motion deblurring
-- super-resolution
-- deterministic tiling
-- learned tracked cropping
+| Condition | Isolated operation |
+| --- | --- |
+| Baseline | Original frames |
+| Resize x2 | Bicubic enlargement; scale control for super-resolution |
+| CLAHE | Local luminance contrast, clip 2.0, grid 8 × 8 |
+| Gamma darken / brighten | Separate runs at gamma 0.8 / 1.2 |
+| NLM denoising | Colored non-local means, h/h_color 7, windows 7/21 |
+| Bilateral denoising | Diameter 7, color/space sigma 50 |
+| Unsharp mask | Kernel 5, sigma 1, amount 0.75 |
+| Motion deblur | Wiener deconvolution, horizontal length-9 PSF, NSR 0.01 |
+| Super-resolution | Pinned FSRCNN x2 checkpoint through OpenCV |
+| Deterministic tiling | 2 × 2 regions, 10% overlap |
+| Learned tracked cropping | Shared football-detector/ByteTrack crops, 10% padding |
 
-The first full-frame screening batch uses four single-factor configurations on the
-same 30-second clip. Each artifact is shared by YOLO Pose and OpenPose, which run
-serially with unchanged full-resolution model settings:
+This is **12 conditions × 3 models = 36 model jobs**: YOLO26 Pose, OpenPose and
+HRNet-W32, run serially. Identity is represented by the unchanged baseline.
+Segmentation, grayscale and dual-illumination estimation are not implemented
+experimental conditions. Validate the HRNet container on Lyra before a full screen.
 
-| Configuration | Isolated change | Purpose |
-| --- | --- | --- |
-| `lyra-preprocess-clahe.yaml` | CLAHE, clip 2.0 | Normalize local contrast across sun and shadow |
-| `lyra-preprocess-gamma-darken.yaml` | gamma 0.8 | Recover contrast in bright regions |
-| `lyra-preprocess-gamma-brighten.yaml` | gamma 1.2 | Lift players located in shadow |
-| `lyra-preprocess-unsharp.yaml` | mild unsharp mask | Strengthen small player edges before model resizing |
+HRNet's fixed top-down input adapter uses our existing YOLO football detector
+(`models/player_detection_model_best/best.pt`, uploaded as
+`/mnt/storage2/vincent/football-pose/models/player-detection-best.pt`). It detects
+people in each processed frame or tile, creates padded person crops, and runs
+HRNet-W32 COCO pose weights on each crop. No generic MMDetection human detector is
+downloaded or used. Detector settings and both checkpoint hashes are recorded as
+part of the HRNet model protocol. YOLO detection weights supply boxes, not HRNet's
+keypoint weights; its separate standard HRNet checkpoint remains necessary.
 
-After reserving GPU 7, run the configurations serially:
+This mandatory adapter is constant within HRNet's comparisons, not an extra
+candidate enhancement. Its baseline is detector + HRNet on unenhanced frames;
+compare each family to its own baseline. In the explicit shared-crop condition,
+all three models reuse the common crops and HRNet does not detect again. The
+internal HRNet adapter does not advance ByteTrack separately for each tile; the
+shared crop condition retains its existing once-per-video-frame tracking.
+Cross-family comparisons must state these different full-frame input protocols.
 
-```bash
-export CUDA_VISIBLE_DEVICES=7
+The supplied crop detector's class map was checked: ball 0, goalkeeper 1,
+player 2, referee 3. Cropping uses [1, 2, 3], not the ball. Its checkpoint,
+1920-pixel inference size, confidence and tracker settings are fixed and archived;
+cropping is a separate detector-assisted condition, not fine-tuning either pose model.
+Crops in the shared-crop condition are generated once and shared by all three pose
+runners. Host detector VRAM is released before the pose containers start. HRNet's
+internal detector, when needed, runs inside its own container.
 
-for config in \
-  configs/lyra-preprocess-clahe.yaml \
-  configs/lyra-preprocess-gamma-darken.yaml \
-  configs/lyra-preprocess-gamma-brighten.yaml \
-  configs/lyra-preprocess-unsharp.yaml
-do
-  python -m football_pose run "$config"
-done
+Super-resolution uses [FSRCNN's published OpenCV-compatible weights](https://github.com/Saafke/FSRCNN_Tensorflow)
+at revision `6a4812c4ef1c4f5947d79beafa32a05a6eb4a94d`, SHA-256
+`366b33f0084c7b3f2bf6724f0a2c77bca94fcec9d7b6d72389d330073b380d5c`.
+This is learned enhancement, not recovery of guaranteed true detail. Resize x2 is
+the non-learned scale control. Both produce enlarged artifacts, but **pose inference
+sizes remain fixed at YOLO 1920 and OpenPose 1920x1088**. Enlarged full frames
+therefore get fitted back to those model sizes. This measures enhancement at a fixed
+pose-input protocol, not unrestricted 4K inference. Test larger model inputs only
+as a separate resolution ablation.
 
-python -m football_pose build-overview \
-  /home/vincent/football-pose-results/native-resolution \
-  --model yolo-pose \
-  --model openpose-body25
-```
+Deblurring assumes the specified motion direction/kernel; it does not estimate
+camera motion. Denoising or sharpening can remove useful detail or introduce
+artifacts. These are reproducible starting parameters, not presumed improvements.
 
-Each command materializes one lossless artifact and then runs YOLO Pose followed by
-OpenPose. Release GPU 7 after the final command completes or immediately after a
-failure. No container rebuild is required for these host-side preprocessing changes.
-The final command regenerates the objective record-count table at
-`/home/vincent/football-pose-results/native-resolution/results-overview/records.md`.
+The command sets all model/pitch/crop GPU IDs, checks selected assets and Docker
+images before starting, and always includes the same-model baseline. Use repeated
+`--method` or `--model` flags for a smaller screen. Missing assets are errors,
+not silently skipped methods. See [server.md](server.md) for asset upload/download,
+tmux and exact run commands.
 
-The initial video inspection showed strong local illumination differences but little
-obvious sensor noise or consistent motion-blur direction. Denoising and configured
-motion deblurring therefore remain second-tier screens rather than being mixed into
-the first batch. Super-resolution remains separate because it requires a pinned model
-checkpoint and changes both computational cost and image scale.
+Each invocation creates a new timestamped directory below mounted
+`/mnt/storage2/vincent/football-pose/results/football/single-step`, containing:
 
-Promote only beneficial individual steps into combination experiments. Every promoted
-combination is compared against its direct parent pipeline so the contribution of each
-added step remains visible.
+- `configs/*.yaml`: exact expanded conditions, plus checkpoint hashes in the report.
+- `screening.json`: status, full per-condition summaries, errors and comparison rows.
+- `comparison.csv` / `comparison.md`: raw/on-pitch yields, records per original frame,
+  model wall time/source-frame throughput and baseline-relative changes.
+- Per-condition experiment/job folders: normal JSONL, Parquet, pitch decisions and logs.
+
+Annotated videos and preprocessing caches also stay on mounted storage. Videos
+are isolated by invocation, avoiding reuse of a previous run's rendering.
+Reports update after every condition; failed conditions stay visible and remaining
+conditions continue. Interrupted runs preserve reports for completed conditions.
+A new invocation runs fresh pose jobs and may reuse preprocessing artifacts.
+
+Model wall time includes container startup and decoding, not only network inference;
+HRNet's time additionally includes its required YOLO detection and crop generation.
+Its runner log reports detector/crop and pose-stage times separately.
+Preprocessing and pitch geometry are shared; do not count the same shared cost twice
+when comparing models. Condition wall time includes all selected model jobs and rendering.
+Cold artifact-processing time and current cache-access wall time are reported
+separately: do not claim an acceleration from comparing a cold run with a warm one.
+Percentage changes are unavailable when the baseline failed, is missing, or is zero.
+
+This batch measures **yield and runtime**, not pose accuracy. AP/AR/OKS/PCK on
+football footage still require aligned annotated ground truth. The existing COCO
+benchmark remains an unchanged model-setup check. Promote combinations only after
+individual conditions have been compared with their matching baseline.
 
 ### 5. Final confirmation
 
@@ -341,8 +438,8 @@ OUTPUT_DIR/
 ```
 
 The IDs prevent results from different pipelines and model settings from colliding.
-A two-model configuration therefore produces two `JOB_ID` directories: one for YOLO
-Pose and one for OpenPose.
+A two-model configuration produces two `JOB_ID` directories. The current screening
+base contains three models and therefore produces three job directories per condition.
 
 | File | Meaning | Use |
 | --- | --- | --- |
@@ -370,7 +467,7 @@ audio and do not replace the Parquet predictions or later quantitative metrics.
 The configuration name, experiment ID, job ID, and video-settings ID in the path keep
 videos from different processing pipelines, checkpoints, and rendering settings from
 colliding. A configuration containing YOLO Pose and OpenPose therefore creates two
-MP4 files. The same mechanism also creates an HRNet video when that model is added.
+MP4 files. The three-model screen also creates an HRNet video for each condition.
 The resulting path is stored as `jobs[].outputs.video` in both `job.json` and
 `summary.json`; render duration is stored as `jobs[].timings.video_render_seconds`.
 
@@ -398,7 +495,7 @@ predictions per frame. Both remain detection-yield diagnostics, not accuracy met
 false positives can still increase them and missed players decrease them. Pose quality
 can only be established through visual inspection and later ground-truth metrics.
 
-Current 30-second screening results are:
+Historical low-resolution YOLOv8/OpenPose pilot results (not the current YOLO26 screen):
 
 An objective baseline-relative table can be regenerated from saved summaries using the
 instructions in [`results-overview/README.md`](results-overview/README.md).
@@ -412,12 +509,9 @@ instructions in [`results-overview/README.md`](results-overview/README.md).
 | Unsharp mask | 0 | 933 | 1.19 | +13.0% |
 | 2 x 2 tiling, 10% overlap | 451 | 5,989 | 7.66 | +625.1% raw |
 
-CLAHE is currently the strongest non-tiling transformation by raw OpenPose yield, and
-unsharp masking is the only other full-frame transformation that increased it. Neither
-gamma variant is promoted. YOLO remaining at zero for every full-frame pixel-level
-transformation supports the player-scale bottleneck hypothesis. Tiling remains the
-largest gain, but its records must be deduplicated in source-frame coordinates before
-being interpreted as detections or compared with ground truth.
+These pilot counts motivated the full-resolution comparisons; they do not establish
+which method is best with the current checkpoints and inference sizes. Overlapping
+tile records must be deduplicated before being compared with ground truth.
 
 ## Fair-comparison rules
 
@@ -435,12 +529,17 @@ being interpreted as detections or compared with ground truth.
 
 - `configs/`: one reproducible YAML file per pipeline.
 - `src/football_pose/preprocessing/`: interchangeable processing steps and registry.
+- `src/football_pose/screening.py`: single-step suite, preflight and automatic comparison reports.
+- `configs/lyra-preprocessing-screen.yaml`: all single-factor conditions; the adjacent
+  `lyra-preprocessing-base.yaml` holds shared model and pitch settings.
 - `src/football_pose/preprocessing/tiling.py`: deterministic tile generation.
 - `src/football_pose/preprocessing/cropping.py`: learned detection, tracking, and crops.
 - `src/football_pose/artifacts.py`: immutable lossless inputs shared by the models.
 - `src/football_pose/pitch_filter.py`: cached pitch geometry, cross-tile deduplication,
   ground-point classification, and filtered archives.
 - `runners/`: isolated YOLO Pose, HRNet-W32, and OpenPose adapters.
+- `src/football_pose/hrnet_input.py`: existing YOLO player detector → person crops
+  for HRNet, with automatic reuse of shared person-crop artifacts.
 - `experiment-output/` or the configured server results directory: manifests, logs,
   JSONL, and Parquet results.
 

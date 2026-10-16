@@ -6,7 +6,7 @@ Convert football match footage into proffesional level player & ball tracking da
 
 The repository now includes a configuration-driven pipeline for the master-thesis experiments. It accepts any PyAV-readable video (MP4, MOV, MKV, and similar), applies an ordered list of interchangeable preprocessing steps, caches the processed frames losslessly, and runs isolated pose-model commands. Every runner writes the same validated COCO-17 schema in original-video coordinates; the durable result is a Zstandard-compressed Parquet archive plus provenance.
 
-The intended server schedule is **stage-serial and GPU-parallel**: YOLO Pose finishes first using all configured GPUs, then HRNet-W32 uses all GPUs, then OpenPose does the same. Frame/crop indices are deterministically sharded across those GPUs and merged afterward. If any shard reports a CUDA OOM, the whole model attempt is restarted with half the batch size.
+The server schedule is **stage-serial and GPU-parallel**: models run in YAML order (the default screen uses YOLO26, OpenPose, then HRNet), each using its configured GPUs. Frame/crop indices are deterministically sharded across those GPUs and merged afterward. If any shard reports a CUDA OOM, the whole model attempt is restarted with half the batch size.
 
 ### Local setup and smoke run
 
@@ -32,7 +32,27 @@ PYTHONPATH=src pytest -q
 
 ### Defining experiments
 
-Copy [configs/server-three-models.yaml](./configs/server-three-models.yaml) and edit its input, model checkpoints, commands, processors, and GPU IDs. Processor order in YAML is execution order. Currently registered steps are `identity`, `resize`, `clahe`, `gamma`, `nlm_denoise`, `bilateral_denoise`, `motion_deblur`, `super_resolution`, `tile`, and `crop`. A processor implements one small interface, so another OpenCV operation can be added without changing video ingestion, caching, runners, or output validation.
+Copy [configs/server-three-models.yaml](./configs/server-three-models.yaml) and edit its input, model checkpoints, commands, processors, and GPU IDs. Processor order in YAML is execution order. Currently registered steps are `identity`, `resize`, `clahe`, `gamma`, `nlm_denoise`, `bilateral_denoise`, `unsharp_mask`, `motion_deblur`, `super_resolution`, `tile`, and `crop`. A processor implements one small interface, so another OpenCV operation can be added without changing video ingestion, caching, runners, or output validation.
+
+For the YOLO26/OpenPose/HRNet **single-step comparison**, use
+[configs/lyra-preprocessing-screen.yaml](./configs/lyra-preprocessing-screen.yaml).
+It runs an unchanged baseline plus each processing condition, saves expanded YAML,
+predictions and videos, and automatically writes baseline-relative CSV/Markdown
+yield and runtime tables. HRNet uses our stored YOLO player detector for boxes and
+its own HRNet pose checkpoint for joints, reusing shared person crops when present.
+See [server.md](./server.md) for required assets, container validation, GPU selection
+and tmux commands. Before running, check the
+selected reserved physical GPU (example 0):
+
+```shell
+python -m football_pose screen-preprocessing configs/lyra-preprocessing-screen.yaml --device 0 --check-only
+python -m football_pose screen-preprocessing configs/lyra-preprocessing-screen.yaml --device 0
+```
+
+All twelve conditions use the same model/pitch settings; the default suite runs
+36 model jobs. This measures yield/runtime, not football pose accuracy without
+ground truth. HRNet's baseline includes its mandatory YOLO detector; model wall
+time includes that input-adapter cost.
 
 The recommended server deployment uses one host orchestrator environment and an isolated container for each real model:
 
