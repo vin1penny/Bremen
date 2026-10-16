@@ -15,6 +15,32 @@ from football_pose.preprocessing import REGISTRY
 app = typer.Typer(no_args_is_help=True, help="Run modular football pose experiments.")
 
 
+@app.command("screen-preprocessing")
+def screen_preprocessing(
+    config: Path,
+    device: int = typer.Option(..., min=0, help="Reserved physical GPU ID; applied to every model and pitch/crop detector."),
+    methods: list[str] | None = typer.Option(None, "--method", help="Repeat to select conditions; baseline is always included."),
+    models: list[str] | None = typer.Option(None, "--model"),
+    check_only: bool = typer.Option(False, help="Validate assets, processor settings and Docker images without running experiments."),
+) -> None:
+    from football_pose.screening import run_screening
+
+    try:
+        path = run_screening(
+            config, device=device, methods=set(methods or []), models=set(models or []),
+            check_only=check_only, progress=typer.echo,
+        )
+    except (ValueError, OSError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    if path is not None:
+        report = json.loads(path.read_text())
+        typer.echo(f"Summary: {path}")
+        typer.echo(f"Comparison: {path.parent / 'comparison.md'}")
+        if not report["success"]:
+            raise typer.Exit(1)
+
+
 @app.command("evaluate-coco")
 def evaluate_coco(
     config: Path,

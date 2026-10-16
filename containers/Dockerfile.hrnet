@@ -9,8 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /workspace
 COPY requirements/hrnet.txt requirements/hrnet.txt
 RUN python3 -m pip install --no-cache-dir \
-      torch==2.1.0 torchvision==0.16.0 openmim==0.3.9 \
-    && mim install mmengine==0.10.7 mmcv==2.1.0 \
+      numpy==1.26.4 \
+    && python3 -m pip install --no-cache-dir \
+      torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118 \
+    && python3 -m pip install --no-cache-dir --only-binary=mmcv \
+      mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.1/index.html \
     && python3 -m pip install --no-cache-dir -r requirements/hrnet.txt
 COPY src src
 COPY runners/hrnet runners/hrnet

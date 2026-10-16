@@ -37,6 +37,12 @@ class Pipeline:
     def requires_png_shards(self) -> bool:
         return any(processor.name in {"crop", "tile"} for processor in self.processors)
 
+    def close(self) -> None:
+        for processor in self.processors:
+            close = getattr(processor, "close", None)
+            if close is not None:
+                close()
+
     def process(
         self, packets: Iterable[FramePacket], context: ProcessorContext
     ) -> Iterator[FramePacket]:

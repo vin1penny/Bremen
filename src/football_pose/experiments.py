@@ -77,17 +77,20 @@ class ExperimentRunner:
             "preprocessing": context.metadata,
             **collect_provenance(),
         }
-        path, manifest, cache_hit = self.artifact_store.materialize(
-            packets,
-            artifact_identifier=identifier,
-            source_sha256=source_hash,
-            pipeline_sha256=pipeline_sha,
-            artifact_format=artifact_format,
-            shard_size=self.config.cache.shard_size,
-            rate=info.average_rate,
-            pinned=self.config.cache.pin,
-            provenance=provenance,
-        )
+        try:
+            path, manifest, cache_hit = self.artifact_store.materialize(
+                packets,
+                artifact_identifier=identifier,
+                source_sha256=source_hash,
+                pipeline_sha256=pipeline_sha,
+                artifact_format=artifact_format,
+                shard_size=self.config.cache.shard_size,
+                rate=info.average_rate,
+                pinned=self.config.cache.pin,
+                provenance=provenance,
+            )
+        finally:
+            pipeline.close()
         return PreparedExperiment(
             experiment_id=experiment_identifier,
             pipeline_id=pipeline_sha,
@@ -102,6 +105,10 @@ class ExperimentRunner:
         model_payload = model.model_dump(mode="json")
         if model.checkpoint is not None and model.checkpoint.is_file():
             model_payload["checkpoint_sha256"] = sha256_file(model.checkpoint)
+        model_payload["auxiliary_checkpoint_sha256"] = {
+            name: sha256_file(checkpoint)
+            for name, checkpoint in model.auxiliary_checkpoints.items()
+        }
         model_payload["implementation"] = self._implementation_fingerprint(
             preprocessing_only=False
         )
@@ -362,6 +369,10 @@ class ExperimentRunner:
                     if model.checkpoint is not None and model.checkpoint.is_file()
                     else None
                 ),
+                "auxiliary_checkpoint_sha256": {
+                    name: sha256_file(checkpoint)
+                    for name, checkpoint in model.auxiliary_checkpoints.items()
+                },
                 "artifact": prepared.artifact_manifest.model_dump(mode="json"),
                 "batch_size": result.batch_size,
                 "attempts": result.attempts,

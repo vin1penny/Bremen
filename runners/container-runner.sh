@@ -21,7 +21,7 @@ fi
 arguments=("$@")
 for ((index = 0; index < ${#arguments[@]}; index++)); do
   case "${arguments[index]}" in
-    --input-artifact|--checkpoint)
+    --input-artifact|--checkpoint|--detector-checkpoint)
       index=$((index + 1))
       path="${arguments[index]}"
       if [[ "${path}" != "${repository}"/* ]]; then
@@ -41,7 +41,12 @@ done
 exec docker run --rm \
   "${gpu_arguments[@]}" \
   "${mount_arguments[@]}" \
+  --user "$(id -u):$(id -g)" \
   --workdir "${repository}" \
+  --env XDG_CACHE_HOME=/tmp/football-pose-cache \
+  --env TORCH_HOME=/tmp/football-pose-torch \
+  --env MPLCONFIGDIR=/tmp/football-pose-matplotlib \
+  --env YOLO_CONFIG_DIR=/tmp/ultralytics \
   --env "PYTHONPATH=${repository}/src" \
   "${image}" \
   "$@"

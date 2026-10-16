@@ -13,6 +13,7 @@ from football_pose.preprocessing.opencv import (
     MotionDeblurProcessor,
     NlmDenoiseProcessor,
     ResizeProcessor,
+    SuperResolutionProcessor,
     UnsharpMaskProcessor,
 )
 from football_pose.preprocessing.tiling import TileProcessor
@@ -146,3 +147,107 @@ def test_crop_after_tile_has_unique_nested_identity(packet: FramePacket) -> None
 def test_tile_rejects_invalid_configuration(params: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         TileProcessor(**params)
+
+
+@pytest.mark.parametrize("params", [
+    {"length": 0}, {"length": 4}, {"nsr": 0},
+    {"angle_degrees": float("nan")}, {"nsr": float("inf")},
+])
+def test_deblur_rejects_invalid_parameters(params) -> None:
+    with pytest.raises(ValueError):
+        MotionDeblurProcessor(**params)
+
+
+@pytest.mark.parametrize("params", [
+    {"template_window": 2}, {"search_window": 2},
+    {"template_window": 9, "search_window": 7}, {"h": float("nan")},
+])
+def test_nlm_rejects_invalid_parameters(params) -> None:
+    with pytest.raises(ValueError):
+        NlmDenoiseProcessor(**params)
+
+
+def test_sr_rejects_wrong_checksum_before_loading_graph(tmp_path) -> None:
+    path = tmp_path / "model.pb"
+    path.write_bytes(b"not a graph")
+    with pytest.raises(ValueError, match="SHA-256"):
+        SuperResolutionProcessor(checkpoint=str(path), checkpoint_sha256="0" * 64)
+
+
+def test_crop_detector_is_lazy_uses_explicit_settings_and_filters_classes(tmp_path, monkeypatch, packet) -> None:
+    import supervision as sv
+    import ultralytics
+    from football_pose.preprocessing.cropping import UltralyticsDetectionProvider
+
+    checkpoint = tmp_path / "detector.pt"
+    checkpoint.write_bytes(b"fixture")
+    calls = []
+    class Model:
+        task = "detect"
+        names = {0: "ball", 1: "goalkeeper", 2: "player", 3: "referee"}
+        def __init__(self, path):
+            calls.append(path)
+        def __call__(self, image, **kwargs):
+            calls.append(kwargs)
+            return [object()]
+        def to(self, device):
+            calls.append(device)
+    monkeypatch.setattr(ultralytics, "YOLO", Model)
+    detections = sv.Detections(
+        xyxy=np.array([[0, 0, 2, 2], [3, 3, 5, 5], [8, 8, 10, 10], [15, 15, 20, 20]], dtype=float),
+        confidence=np.array([.9] * 4), class_id=np.arange(4),
+    )
+    monkeypatch.setattr(sv.Detections, "from_ultralytics", lambda _: detections)
+    provider = UltralyticsDetectionProvider(
+        checkpoint=str(checkpoint), device="4", image_size=1920,
+        class_ids=[1, 2, 3], track=True,
+        expected_class_names={1: "goalkeeper", 2: "player", 3: "referee"},
+    )
+    assert calls == []
+    first = provider.detect(packet)
+    assert len(first) == 3
+    assert all(detection.track_id is not None for detection in first)
+    second = provider.detect(packet.derived(packet.image, frame_index=4, timestamp_seconds=0.4))
+    assert [detection.track_id for detection in first] == [detection.track_id for detection in second]
+    assert calls[1]["device"] == "4"
+    assert calls[1]["imgsz"] == 1920
+    provider.close()
+    assert provider.model is None
+    assert calls[-1] == "cpu"
+
+
+def test_pipeline_closes_external_processors() -> None:
+    calls = []
+    class External:
+        def close(self):
+            calls.append("closed")
+    Pipeline([External()]).close()
+    assert calls == ["closed"]
+
+
+@pytest.mark.parametrize("task,names,message", [
+    ("pose", {1: "goalkeeper", 2: "player", 3: "referee"}, "pose weights"),
+    ("detect", {1: "bicycle", 2: "car", 3: "motorcycle"}, "expected_class_names"),
+])
+def test_crop_preflight_rejects_wrong_task_or_class_map(tmp_path, monkeypatch, task, names, message) -> None:
+    import ultralytics
+    from football_pose.preprocessing.cropping import UltralyticsDetectionProvider
+
+    checkpoint = tmp_path / "wrong.pt"
+    checkpoint.write_bytes(b"fixture")
+    class Model:
+        def to(self, device):
+            pass
+    model = Model()
+    model.task = task
+    model.names = names
+    monkeypatch.setattr(ultralytics, "YOLO", lambda _: model)
+    provider = UltralyticsDetectionProvider(
+        checkpoint=str(checkpoint), class_ids=[1, 2, 3],
+        expected_class_names={1: "goalkeeper", 2: "player", 3: "referee"},
+    )
+    try:
+        with pytest.raises(ValueError, match=message):
+            provider.validate()
+    finally:
+        provider.close()

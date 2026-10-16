@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import time
+import json
 
 import numpy as np
 
 from football_pose.artifacts import iter_artifact
 from football_pose.domain import PredictionRecord
+from football_pose.hrnet_input import add_hrnet_arguments, person_packets
+from football_pose.preprocessing.base import ProcessorContext
 from football_pose.model_mapping import bbox_to_source, canonical_keypoints
 from football_pose.runner_cli import batches, contract_args, contract_parser
 
@@ -19,30 +22,38 @@ def _instances(result: dict) -> list[dict]:
 
 def main() -> None:
     parser = contract_parser("MMPose HRNet-W32 artifact runner")
-    parser.add_argument(
-        "--pose-config",
-        default="td-hm_hrnet-w32_8xb64-210e_coco-256x192",
-    )
-    parser.add_argument(
-        "--det-model",
-        default="human",
-        help="Use 'whole_image' for player-crop artifacts and 'human' for full frames.",
-    )
+    add_hrnet_arguments(parser)
     namespace = parser.parse_args()
     args = contract_args(namespace)
+    if args.checkpoint is None or not args.checkpoint.is_file():
+        raise ValueError("HRNet requires an existing HRNet pose checkpoint via --checkpoint")
     from mmpose.apis import MMPoseInferencer
 
     inferencer = MMPoseInferencer(
         pose2d=namespace.pose_config,
         pose2d_weights=str(args.checkpoint) if args.checkpoint else None,
-        det_model=namespace.det_model,
+        det_model="whole_image",
         device="cuda:0",
     )
     packets = iter_artifact(
         args.input_artifact, shard_index=args.shard_index, shard_count=args.shard_count
     )
+    stats = {"input_packets": 0, "detector_calls": 0, "generated_person_crops": 0,
+             "reused_person_crops": 0, "detector_crop_seconds": 0.0, "pose_seconds": 0.0}
+    crops = person_packets(
+        packets, namespace=namespace,
+        context=ProcessorContext(args.experiment_id, args.pipeline_id), stats=stats,
+    )
+    try:
+        _write_predictions(args, inferencer, crops, stats)
+    finally:
+        crops.close()
+    print(json.dumps({"hrnet_input": stats}, sort_keys=True))
+
+
+def _write_predictions(args, inferencer, crops, stats) -> None:
     with args.output_jsonl.open("w", encoding="utf-8") as output:
-        for packet_batch in batches(packets, args.batch_size):
+        for packet_batch in batches(crops, args.batch_size):
             start = time.perf_counter()
             results = list(
                 inferencer(
@@ -52,7 +63,9 @@ def main() -> None:
                     return_vis=False,
                 )
             )
-            elapsed_ms = (time.perf_counter() - start) * 1000 / len(packet_batch)
+            elapsed = time.perf_counter() - start
+            stats["pose_seconds"] += elapsed
+            elapsed_ms = elapsed * 1000 / len(packet_batch)
             for packet, result in zip(packet_batch, results, strict=True):
                 for person_index, instance in enumerate(_instances(result)):
                     xy = np.asarray(instance["keypoints"], dtype=np.float64)
@@ -73,6 +86,7 @@ def main() -> None:
                         crop_id=packet.crop_id,
                         track_id=packet.track_id,
                         person_id=packet.track_id or f"hrnet-{person_index}",
+                        person_score=packet.metadata.get("detection_score"),
                         source_bbox=packet.source_bbox or bbox_to_source(packet, raw_bbox),
                         keypoints=canonical_keypoints(packet, xy, scores),
                         inference_time_ms=elapsed_ms,

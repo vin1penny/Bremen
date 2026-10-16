@@ -20,6 +20,7 @@ class ModelSpec(BaseModel):
     id: str
     command: list[str] = Field(min_length=1)
     checkpoint: Path | None = None
+    auxiliary_checkpoints: dict[str, Path] = Field(default_factory=dict)
     batch_size: int = Field(default=1, ge=1)
     min_batch_size: int = Field(default=1, ge=1)
     devices: list[int] = Field(default_factory=list)
@@ -159,27 +160,41 @@ def load_config(path: str | Path, *, check_paths: bool = True) -> ExperimentConf
         processor.params = _resolve_checkpoint_parameters(processor.params, base)
     for model in config.models:
         model.checkpoint = _resolve_path(base, model.checkpoint)
+        model.auxiliary_checkpoints = {
+            name: _resolve_path(base, checkpoint)
+            for name, checkpoint in model.auxiliary_checkpoints.items()
+        }
     if check_paths:
-        if not config.input.is_file():
-            raise FileNotFoundError(f"input video does not exist: {config.input}")
-        for model in config.models:
-            if model.checkpoint is not None and not model.checkpoint.is_file():
-                raise FileNotFoundError(
-                    f"checkpoint for model {model.id!r} does not exist: {model.checkpoint}"
-                )
-        if (
-            config.pitch_filter.enabled
-            and config.pitch_filter.checkpoint is not None
-            and not config.pitch_filter.checkpoint.is_file()
-        ):
-            raise FileNotFoundError(
-                "pitch-filter checkpoint does not exist: "
-                f"{config.pitch_filter.checkpoint}"
-            )
-        for processor in config.processors:
-            for checkpoint in _parameter_checkpoints(processor.params):
-                if not checkpoint.is_file():
-                    raise FileNotFoundError(
-                        f"checkpoint for processor {processor.type!r} does not exist: {checkpoint}"
-                    )
+        validate_config_paths(config)
     return config
+
+
+def validate_config_paths(config: ExperimentConfig) -> None:
+    """Validate an expanded config as well as one loaded from YAML."""
+    if not config.input.is_file():
+        raise FileNotFoundError(f"input video does not exist: {config.input}")
+    for model in config.models:
+        if model.checkpoint is not None and not model.checkpoint.is_file():
+            raise FileNotFoundError(
+                f"checkpoint for model {model.id!r} does not exist: {model.checkpoint}"
+            )
+        for name, checkpoint in model.auxiliary_checkpoints.items():
+            if not checkpoint.is_file():
+                raise FileNotFoundError(
+                    f"{name} checkpoint for model {model.id!r} does not exist: {checkpoint}"
+                )
+    if (
+        config.pitch_filter.enabled
+        and config.pitch_filter.checkpoint is not None
+        and not config.pitch_filter.checkpoint.is_file()
+    ):
+        raise FileNotFoundError(
+            "pitch-filter checkpoint does not exist: "
+            f"{config.pitch_filter.checkpoint}"
+        )
+    for processor in config.processors:
+        for checkpoint in _parameter_checkpoints(processor.params):
+            if not checkpoint.is_file():
+                raise FileNotFoundError(
+                    f"checkpoint for processor {processor.type!r} does not exist: {checkpoint}"
+                )

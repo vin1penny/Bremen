@@ -11,6 +11,23 @@ from football_pose.configuration import ExperimentConfig, load_config
 REPOSITORY = Path(__file__).resolve().parents[1]
 
 
+def test_auxiliary_checkpoint_paths_are_resolved_and_validated(tmp_path, tiny_video):
+    import yaml
+    checkpoint = tmp_path / "detector.pt"
+    checkpoint.write_bytes(b"weights")
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "name": "auxiliary", "input": str(tiny_video),
+        "models": [{"id": "m", "command": ["runner"],
+                    "auxiliary_checkpoints": {"detector": "detector.pt"}}],
+    }))
+    config = load_config(path)
+    assert config.models[0].auxiliary_checkpoints == {"detector": checkpoint}
+    checkpoint.unlink()
+    with pytest.raises(FileNotFoundError, match="detector checkpoint"):
+        load_config(path)
+
+
 @pytest.mark.parametrize(
     "filename",
     [

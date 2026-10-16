@@ -1,0 +1,67 @@
+base_config: lyra-preprocessing-base.yaml
+output_root: /mnt/storage2/vincent/football-pose/results/football/single-step
+cache_root: /mnt/storage2/vincent/football-pose/cache/preprocessing
+
+# Each condition contains no processor (baseline) or exactly one processor.
+# The CLI sets all model, pitch and crop-detector devices with --device.
+methods:
+  - name: baseline
+  - name: resize-x2
+    processor:
+      type: resize
+      params: {scale: 2, interpolation: cubic}
+  - name: clahe
+    processor:
+      type: clahe
+      params: {clip_limit: 2.0, tile_grid: [8, 8]}
+  - name: gamma-darken
+    processor:
+      type: gamma
+      params: {gamma: 0.8}
+  - name: gamma-brighten
+    processor:
+      type: gamma
+      params: {gamma: 1.2}
+  - name: nlm-denoise
+    processor:
+      type: nlm_denoise
+      params: {h: 7, h_color: 7, template_window: 7, search_window: 21}
+  - name: bilateral-denoise
+    processor:
+      type: bilateral_denoise
+      params: {diameter: 7, sigma_color: 50, sigma_space: 50}
+  - name: unsharp
+    processor:
+      type: unsharp_mask
+      params: {kernel_size: 5, sigma: 1.0, amount: 0.75}
+  - name: motion-deblur
+    processor:
+      type: motion_deblur
+      params: {length: 9, angle_degrees: 0, nsr: 0.01}
+  - name: super-resolution
+    processor:
+      type: super_resolution
+      params:
+        checkpoint: /mnt/storage2/vincent/football-pose/models/super-resolution/FSRCNN_x2.pb
+        checkpoint_sha256: 366b33f0084c7b3f2bf6724f0a2c77bca94fcec9d7b6d72389d330073b380d5c
+        algorithm: fsrcnn
+        scale: 2
+  - name: tile
+    processor:
+      type: tile
+      params: {rows: 2, columns: 2, overlap_ratio: 0.1}
+  - name: crop
+    processor:
+      type: crop
+      params:
+        padding_ratio: 0.1
+        min_size: 32
+        detector:
+          checkpoint: /mnt/storage2/vincent/football-pose/models/player-detection-best.pt
+          confidence: 0.3
+          # Verified local weights: 0 ball, 1 goalkeeper, 2 player, 3 referee.
+          class_ids: [1, 2, 3]
+          expected_class_names: {1: goalkeeper, 2: player, 3: referee}
+          track: true
+          image_size: 1920
+          device: "0"

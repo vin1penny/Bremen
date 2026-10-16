@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from football_pose.domain import FramePacket
+from football_pose.artifacts import sha256_file
 from football_pose.preprocessing.base import ProcessorContext
 
 
@@ -122,7 +123,11 @@ class NlmDenoiseProcessor:
         template_window: int = 7,
         search_window: int = 21,
     ) -> None:
-        if min(h, h_color) < 0 or template_window <= 0 or search_window <= 0:
+        if (
+            not np.isfinite([h, h_color]).all() or min(h, h_color) < 0
+            or template_window <= 0 or template_window % 2 == 0
+            or search_window < template_window or search_window % 2 == 0
+        ):
             raise ValueError("invalid NLM parameters")
         self.params = (h, h_color, template_window, search_window)
 
@@ -187,21 +192,34 @@ class UnsharpMaskProcessor:
 class SuperResolutionProcessor:
     name = "super_resolution"
 
-    def __init__(self, *, checkpoint: str, algorithm: str = "fsrcnn", scale: int = 2) -> None:
+    def __init__(
+        self, *, checkpoint: str, algorithm: str = "fsrcnn", scale: int = 2,
+        checkpoint_sha256: str | None = None,
+    ) -> None:
         model_path = Path(checkpoint)
         if not model_path.is_file():
             raise FileNotFoundError(f"super-resolution checkpoint not found: {model_path}")
-        if algorithm not in {"edsr", "espcn", "fsrcnn", "lapsrn"} or scale <= 1:
+        supported = {"edsr": {2, 3, 4}, "espcn": {2, 3, 4},
+                     "fsrcnn": {2, 3, 4}, "lapsrn": {2, 4, 8}}
+        if algorithm not in supported or scale not in supported[algorithm]:
             raise ValueError("invalid super-resolution model or scale")
+        if checkpoint_sha256 is not None and sha256_file(model_path) != checkpoint_sha256:
+            raise ValueError("super-resolution checkpoint SHA-256 mismatch")
+        if not hasattr(cv2, "dnn_superres"):
+            raise RuntimeError("super_resolution requires opencv-contrib-python (requirements/core.txt)")
         self.scale = scale
         self.model = cv2.dnn_superres.DnnSuperResImpl_create()
         self.model.readModel(str(model_path))
         self.model.setModel(algorithm, scale)
+        self.model.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+        self.model.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
     def process(self, packet: FramePacket, context: ProcessorContext) -> list[FramePacket]:
         del context
         _validate_bgr_u8(packet)
         upscaled = self.model.upsample(packet.image)
+        if upscaled.shape != (packet.height * self.scale, packet.width * self.scale, 3):
+            raise ValueError("super-resolution checkpoint output does not match configured scale")
         current_to_previous = np.array(
             [[1 / self.scale, 0, 0], [0, 1 / self.scale, 0], [0, 0, 1]],
             dtype=np.float64,
@@ -215,8 +233,8 @@ class MotionDeblurProcessor:
     name = "motion_deblur"
 
     def __init__(self, *, length: int = 9, angle_degrees: float = 0.0, nsr: float = 0.01) -> None:
-        if length < 1 or nsr <= 0:
-            raise ValueError("motion deblur requires length >= 1 and nsr > 0")
+        if length < 1 or length % 2 == 0 or not np.isfinite([angle_degrees, nsr]).all() or nsr <= 0:
+            raise ValueError("motion deblur requires odd length >= 1, finite angle and nsr > 0")
         self.length = length
         self.angle_degrees = angle_degrees
         self.nsr = nsr

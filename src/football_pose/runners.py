@@ -87,6 +87,8 @@ class ExternalModelRunner:
         ]
         if self.spec.checkpoint is not None:
             command.extend(("--checkpoint", str(self.spec.checkpoint)))
+        for name, checkpoint in self.spec.auxiliary_checkpoints.items():
+            command.extend((f"--{name.replace('_', '-')}-checkpoint", str(checkpoint)))
         environment = os.environ.copy()
         environment.update(self.spec.environment)
         if device is not None:

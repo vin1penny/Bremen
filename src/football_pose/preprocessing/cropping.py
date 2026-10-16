@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 import numpy as np
@@ -30,23 +31,51 @@ class UltralyticsDetectionProvider:
         confidence: float = 0.3,
         class_ids: list[int] | None = None,
         track: bool = True,
+        device: str = "0",
+        image_size: int = 1920,
+        expected_class_names: dict[int, str] | None = None,
     ) -> None:
+        if not Path(checkpoint).is_file():
+            raise FileNotFoundError(f"player-detector checkpoint not found: {checkpoint}")
+        if not 0 <= confidence <= 1 or image_size < 32:
+            raise ValueError("invalid player-detector confidence or image_size")
+        if class_ids is not None and (not class_ids or min(class_ids) < 0):
+            raise ValueError("class_ids must contain non-negative class IDs")
+        self.checkpoint = checkpoint
+        self.model = None
+        self.confidence = confidence
+        self.class_ids = [2, 3] if class_ids is None else class_ids
+        self.device = device
+        self.image_size = image_size
+        self.expected_class_names = {int(key): value for key, value in (expected_class_names or {}).items()}
+        self.track = track
+        self.tracker = None
+
+    def validate(self) -> None:
+        """Inspect task/classes on CPU before committing to a long screening run."""
         from ultralytics import YOLO
 
-        self.model = YOLO(checkpoint)
-        self.confidence = confidence
-        self.class_ids = class_ids or [2, 3]
-        self.tracker = None
-        if track:
-            import supervision as sv
-
-            self.tracker = sv.ByteTrack()
-            self.tracker.reset()
+        if self.model is None:
+            self.model = YOLO(self.checkpoint)
+            if self.model.task != "detect":
+                raise ValueError("learned cropping requires player-detection weights, not pose weights")
+            if any(index not in self.model.names for index in self.class_ids):
+                raise ValueError("class_ids are absent from the player detector's class map")
+            if any(self.model.names.get(index) != name for index, name in self.expected_class_names.items()):
+                raise ValueError("player detector class names do not match expected_class_names")
 
     def detect(self, packet: FramePacket) -> list[Detection]:
         import supervision as sv
 
-        result = self.model(packet.image, conf=self.confidence, verbose=False)[0]
+        self.validate()
+        if self.track and self.tracker is None:
+            self.tracker = sv.ByteTrack()
+            self.tracker.reset()
+
+        result = self.model(
+            packet.image, conf=self.confidence, imgsz=self.image_size,
+            device=self.device, verbose=False,
+        )[0]
         detections = sv.Detections.from_ultralytics(result)
         if detections.class_id is not None:
             detections = detections[np.isin(detections.class_id, self.class_ids)]
@@ -61,6 +90,19 @@ class UltralyticsDetectionProvider:
             score = 1.0 if confidences is None else float(confidences[index])
             output.append(Detection(tuple(float(value) for value in bbox), score, track_id))
         return output
+
+    def close(self) -> None:
+        """Release host-side detector VRAM before the pose containers start."""
+        if self.model is None:
+            return
+        self.model.to("cpu")
+        self.model = None
+        self.tracker = None
+        import gc
+        gc.collect()
+        import torch
+        if torch.cuda.is_initialized():
+            torch.cuda.empty_cache()
 
 
 class CropProcessor:
@@ -78,6 +120,16 @@ class CropProcessor:
         self.detector = detector
         self.padding_ratio = padding_ratio
         self.min_size = min_size
+
+    def close(self) -> None:
+        close = getattr(self.detector, "close", None)
+        if close is not None:
+            close()
+
+    def validate(self) -> None:
+        validate = getattr(self.detector, "validate", None)
+        if validate is not None:
+            validate()
 
     def process(self, packet: FramePacket, context: ProcessorContext) -> list[FramePacket]:
         del context
