@@ -245,6 +245,49 @@ retained in the decision table as `inside`, `outside`, `duplicate`, or `unavaila
 Only `inside` records enter the separate on-pitch archive. This makes the automatic
 filter reversible and measurable instead of silently deleting detections.
 
+### Pitch-only reference-model check
+
+Before changing the pitch filter, compare our production checkpoint with the
+actual reference from [Roboflow sports](https://github.com/roboflow/sports/tree/42c80c06b6b65a7f89455b89fe31cdf4c38ba227/examples/soccer).
+The new `compare-pitch` command reads the source video/current pitch checkpoint
+from an existing experiment YAML, but does not execute its person models or
+preprocessing. It does not adopt either checkpoint into production.
+
+Both weights use original video frames, inference size 640, batch 1, detection
+confidence 0.25, landmark confidence 0.5 and no temporal fallback. Their 32-slot
+keypoint shape is checked, actual model scale/parameter count and SHA-256 are
+recorded, and the upstream reference checksum is pinned. The previous copied
+Football-PitchVision example's LFS object ID matches this reference; filenames
+alone are not evidence of different weights. Identical checkpoints are flagged.
+Semantic landmark IDs are assumed to follow the shared Roboflow dataset's order;
+matching the number of keypoints alone cannot prove correct landmark identities.
+
+Use **one 105x68 m Weserstadion template** and the same existing robust-fit checks
+for both weights. Roboflow's default radar template is 120x70 m with different
+penalty-area defaults; copying that template would confound a checkpoint test.
+This is a controlled weight comparison, not an exact replay of their complete
+radar pipeline. The upstream topology supplies the green detected segments;
+P0-P31 refer to zero-based output slots, not their separate display-label list.
+
+The result folder contains two pitch-only videos and a synchronized side-by-side
+video, plus full SDK-returned per-frame keypoints/geometry JSON for each model.
+Magenta points are confidence-filtered detections, green segments connect detected
+endpoints, and cyan shows the boundary only when calibration is accepted. Raw
+landmarks remain visible even on rejected-fit frames. Videos retain the original
+image resolution and add a label header; no player model is needed.
+
+The report compares visible-landmark yield, accepted geometry coverage, internal
+fit residuals and common-landmark pixel disagreement. None is ground-truth
+accuracy: a confident or internally consistent detection can still be wrong.
+Inspect line alignment in the videos before selecting production weights.
+Commands, mounted paths, tmux and downloads are in `server.md` under
+"Pitch-only comparison: production vs Roboflow sports".
+
+Later, adapt the upstream radar stage: detected player ground points -> same-frame
+image-to-pitch homography -> metre coordinates -> miniature 2D pitch. That stage,
+player tracking and tracking-data evaluation are deliberately not part of this
+pitch-checkpoint check, and still require the correct venue geometry/conventions.
+
 ## Experiment stages
 
 ### 1. Full-frame baseline

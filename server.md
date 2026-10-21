@@ -169,6 +169,95 @@ coordinates, and estimates same-frame geometry. The pitch is hardcoded as
 between person-preprocessing comparisons. Missing acceptable geometry is reported
 as unclassified, not a reliable rectangular pitch estimate.
 
+### Pitch-only comparison: production vs Roboflow sports
+
+This is separate from the 36-job person-pose screen. It runs no player detector,
+OpenPose or HRNet and never replaces production weights. Both pitch checkpoints
+use every original frame, `imgsz=640`, batch 1, box confidence 0.25 and landmark
+confidence 0.5. Geometry uses our shared **105x68 m Weserstadion** template and
+no frame-to-frame fallback. This compares weights under one protocol, not the
+upstream radar pipeline or ground-truth accuracy. Roboflow's default radar
+template is 120x70 m and must not be copied unchanged for this venue.
+
+Reference: [Roboflow download script](https://github.com/roboflow/sports/blob/42c80c06b6b65a7f89455b89fe31cdf4c38ba227/examples/soccer/setup.sh),
+revision `42c80c06b6b65a7f89455b89fe31cdf4c38ba227`. Its actual checkpoint is
+YOLOv8x-pose with 32 landmarks. A copied `.pt` can be only a Git LFS pointer;
+download the real file below (about 140 MB). Its SHA also matches the LFS object
+ID in the previously supplied Football-PitchVision example.
+
+**Once on Lyra**, with the updated code and venv active:
+
+```bash
+cd /home/vincent/projects/Bremen
+mkdir -p /mnt/storage2/vincent/football-pose/models/pitch-reference
+RF_PITCH=/mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt
+```
+
+If `python -m gdown --help` is unavailable, install `gdown==5.2.1` in this venv.
+Download without overwriting an existing reference:
+
+```bash
+if [ ! -f "$RF_PITCH" ]; then
+  .venv/bin/python -m gdown \
+    'https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf' \
+    -O "$RF_PITCH.part" && mv -n "$RF_PITCH.part" "$RF_PITCH"
+fi
+printf '%s  %s\n' \
+  28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36 \
+  "$RF_PITCH" | sha256sum --check -
+```
+
+Only continue after `OK`. Check GPU availability/reservation, then open tmux:
+
+```bash
+nvidia-smi --query-gpu=index,memory.used,memory.free,utilization.gpu --format=csv
+tmux new -A -s pitch-comparison
+```
+
+Inside tmux reactivate the venv and set `PYTHONPATH` as in section 1. Example with
+available/permitted GPU 7 (replace both IDs if needed):
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+export CUDA_VISIBLE_DEVICES=7
+set -o pipefail
+mkdir -p /mnt/storage2/vincent/football-pose/results/logs
+.venv/bin/python -u -m football_pose compare-pitch \
+  configs/lyra-openpose-full-frame.yaml \
+  --reference-checkpoint /mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt \
+  --output-root /mnt/storage2/vincent/football-pose/results/pitch-comparison \
+  --device 7 \
+  2>&1 | tee /mnt/storage2/vincent/football-pose/results/logs/pitch-comparison-$(date +%Y%m%dT%H%M%S).log
+```
+
+The existing YAML supplies only the input video, our production pitch checkpoint
+and fit thresholds; its OpenPose/model/processor settings are not run. The command
+overrides both pitch devices, image size, batch and confidence settings equally.
+Progress names each checkpoint and reports rendering every 100 frames. Detach with
+Ctrl+B, D; reconnect using `tmux attach -t pitch-comparison`.
+
+The printed timestamped result directory contains `ours.mp4`, `roboflow.mp4`,
+`side-by-side.mp4` (ours left), `ours-geometry.json`, `roboflow-geometry.json`,
+`summary.json` and `comparison.md`. Videos retain original image resolution plus a
+64-pixel header; the side-by-side video has twice the image width. All videos are
+pitch-only and synchronized, without audio. Magenta P0-P31 = visible landmarks,
+green = segments between confident detected endpoints, cyan = accepted boundary.
+Landmarks are shown even when fitting fails. Summary records checkpoint hashes,
+actual model scale/parameter count, shared settings, fit coverage and same-ID
+landmark disagreement in original pixels. These are diagnostics, not accuracy.
+Identical file hashes are explicitly flagged. Geometry can reuse a matching cache
+below the output root; old person-pose runs/results remain untouched.
+
+**On the Mac**, copy the printed run directory (replace `RUN_ID`):
+
+```bash
+mkdir -p /Users/larry/Downloads/pitch-comparison
+scp -r vincent@lyra:/mnt/storage2/vincent/football-pose/results/pitch-comparison/RUN_ID \
+  /Users/larry/Downloads/pitch-comparison/
+```
+
 ### One complete OpenPose run
 
 With the venv active and the shell/YAML GPU settings matching:

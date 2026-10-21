@@ -15,6 +15,25 @@ from football_pose.preprocessing import REGISTRY
 app = typer.Typer(no_args_is_help=True, help="Run modular football pose experiments.")
 
 
+@app.command("compare-pitch")
+def compare_pitch_models(
+    config: Path,
+    reference_checkpoint: Path = typer.Option(..., help="Roboflow sports pitch checkpoint; production weights stay unchanged."),
+    output_root: Path = typer.Option(..., help="Mounted storage directory for pitch-only videos and reports."),
+    device: int = typer.Option(..., min=0, help="Reserved physical GPU ID, applied to both pitch models."),
+) -> None:
+    from football_pose.pitch_comparison import compare_pitch
+
+    try:
+        summary = compare_pitch(config, reference_checkpoint=reference_checkpoint,
+                                output_root=output_root, device=device, progress=typer.echo)
+    except (ValueError, OSError, RuntimeError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"Summary: {summary}")
+    typer.echo(f"Videos and comparison: {summary.parent}")
+
+
 @app.command("screen-preprocessing")
 def screen_preprocessing(
     config: Path,
