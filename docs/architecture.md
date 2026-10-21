@@ -39,7 +39,13 @@ time includes its detector and crop stage; comparisons use its own fixed-protoco
 baseline. Generic MMDetection human detection is disabled.
 
 Pitch localization is independent of preprocessing and pose inference. One
-source/checkpoint/settings combination creates a reusable geometry manifest. Each pose
+production model is used everywhere: the selected Roboflow sports YOLOv8x
+32-landmark checkpoint, at 640/batch 1, with our 105x68 m Weserstadion template.
+Active YAML pins its path and `checkpoint_sha256`; config validation and geometry
+preparation reject any mismatching file before inference/cache reuse. Historical
+comparison configs remain explicitly separate. Changing pitch weights changes
+geometry/decision/video identity, not person-pose weights or preprocessing.
+One source/checkpoint/settings combination creates a reusable geometry manifest. Each pose
 job preserves its raw archive, removes only cross-region IoU duplicates, classifies a
 person's ankle or box-bottom ground point, and writes a separate on-pitch archive plus
 one auditable decision per raw prediction. Missing or rejected geometry never mutates

@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from football_pose.archive import PREDICTION_SCHEMA, read_archive
 from football_pose.artifacts import sha256_file, stable_hash
-from football_pose.configuration import PitchFilterConfig
+from football_pose.configuration import PitchFilterConfig, validate_pitch_checkpoint
 from football_pose.jobs import atomic_write_json
 from football_pose.video import VideoSource
 
@@ -357,9 +357,7 @@ class PitchGeometryStore:
         source_sha256: str,
         config: PitchFilterConfig,
     ) -> PreparedPitchGeometry:
-        if config.checkpoint is None:
-            raise ValueError("pitch-filter checkpoint is required")
-        checkpoint_sha256 = sha256_file(config.checkpoint)
+        checkpoint_sha256 = validate_pitch_checkpoint(config)
         settings = _geometry_settings(config)
         identifier = stable_hash(
             {

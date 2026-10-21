@@ -19,14 +19,15 @@ from football_pose.artifacts import sha256_file, stable_hash
 from football_pose.configuration import load_config
 from football_pose.jobs import atomic_write_json
 from football_pose.pitch_filter import PitchGeometryFrame, PitchGeometryStore, PreparedPitchGeometry
+from football_pose.pitch_models import ROBOFLOW_SPORTS_REVISION, ROBOFLOW_PITCH_URL, ROBOFLOW_PITCH_SHA256
 from football_pose.provenance import collect_provenance
 from football_pose.video import VideoSource
 from football_pose.visualization import _draw_pitch_region
 
 
-UPSTREAM_REVISION = "42c80c06b6b65a7f89455b89fe31cdf4c38ba227"
-REFERENCE_URL = "https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf"
-REFERENCE_SHA256 = "28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36"
+UPSTREAM_REVISION = ROBOFLOW_SPORTS_REVISION
+REFERENCE_URL = ROBOFLOW_PITCH_URL
+REFERENCE_SHA256 = ROBOFLOW_PITCH_SHA256
 # Edges from sports/configs/soccer.py at UPSTREAM_REVISION, converted to zero-based IDs.
 PITCH_EDGES = tuple((a - 1, b - 1) for a, b in (
     (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (7, 8),
@@ -214,7 +215,7 @@ def compare_pitch(
         "reference_expected_sha256": REFERENCE_SHA256,
         "identical_checkpoints": identical, "models": metadata,
         "settings": {key: value for key, value in settings.model_dump(mode="json").items()
-                     if key not in {"checkpoint", "cache_root"}},
+                     if key not in {"checkpoint", "checkpoint_sha256", "cache_root"}},
         "pitch_template": "Weserstadion only: 105 x 68 m; shared 32-landmark ordering",
         "landmark_order_assumption": "Both checkpoints must use the Roboflow football-field 32-slot semantic order; shape validation alone cannot prove semantic correspondence.",
         "implementation_sha256": sha256_file(Path(__file__)),
@@ -232,7 +233,10 @@ def compare_pitch(
     for name, checkpoint in checkpoints.items():
         progress(f"Inferring {name}: every frame, imgsz=640, batch=1 (or reuse matching geometry cache)")
         geometry = store.prepare(source_path=config.input, source_sha256=source_hash,
-                                 config=settings.model_copy(update={"checkpoint": checkpoint}))
+                                 config=settings.model_copy(update={
+                                     "checkpoint": checkpoint,
+                                     "checkpoint_sha256": metadata[name]["sha256"],
+                                 }))
         if geometry.manifest.checkpoint_sha256 != metadata[name]["sha256"]:
             raise RuntimeError(f"Checkpoint changed during comparison: {checkpoint}")
         geometries[name] = geometry

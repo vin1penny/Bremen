@@ -4,6 +4,12 @@ Convert football match footage into proffesional level player & ball tracking da
 
 ## Modular pose-experiment pipeline
 
+Production football pitch localization uses the verified Roboflow sports YOLOv8x
+32-landmark checkpoint (640 pixels, batch 1), with our **105x68 m Weserstadion**
+geometry. Active configs pin its SHA-256 and mounted-storage path; the old trained
+nano checkpoint is retained only for historical comparisons. Person-pose models
+remain YOLO26, OpenPose and HRNet, and COCO evaluation has no pitch filtering.
+
 The repository now includes a configuration-driven pipeline for the master-thesis experiments. It accepts any PyAV-readable video (MP4, MOV, MKV, and similar), applies an ordered list of interchangeable preprocessing steps, caches the processed frames losslessly, and runs isolated pose-model commands. Every runner writes the same validated COCO-17 schema in original-video coordinates; the durable result is a Zstandard-compressed Parquet archive plus provenance.
 
 The server schedule is **stage-serial and GPU-parallel**: models run in YAML order (the default screen uses YOLO26, OpenPose, then HRNet), each using its configured GPUs. Frame/crop indices are deterministically sharded across those GPUs and merged afterward. If any shard reports a CUDA OOM, the whole model attempt is restarted with half the batch size.

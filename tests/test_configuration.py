@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from football_pose.configuration import ExperimentConfig, load_config
+from football_pose.pitch_models import ROBOFLOW_PITCH_CHECKPOINT, ROBOFLOW_PITCH_SHA256
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -41,12 +42,20 @@ def test_auxiliary_checkpoint_paths_are_resolved_and_validated(tmp_path, tiny_vi
         "lyra-preprocess-gamma-brighten.yaml",
         "lyra-preprocess-gamma-darken.yaml",
         "lyra-preprocess-unsharp.yaml",
+        "lyra-preprocessing-base.yaml",
     ],
 )
 def test_active_football_configs_use_640_pitch_inference(filename: str) -> None:
     config = load_config(REPOSITORY / "configs" / filename, check_paths=False)
     assert config.pitch_filter.enabled
     assert config.pitch_filter.image_size == 640
+    assert config.pitch_filter.checkpoint == ROBOFLOW_PITCH_CHECKPOINT
+    assert config.pitch_filter.checkpoint_sha256 == ROBOFLOW_PITCH_SHA256
+    assert config.pitch_filter.batch_size == 1
+    assert config.pitch_filter.cache_root == Path("/mnt/storage2/vincent/football-pose/cache/pitch")
+    assert config.pitch_filter.detection_confidence == .25
+    assert config.pitch_filter.landmark_confidence == .5
+    assert config.pitch_filter.max_fallback_frames == 0
 
 
 def test_config_rejects_duplicate_model_ids() -> None:
@@ -196,6 +205,31 @@ def test_preprocessing_screen_configs_change_only_the_named_processor(
         "/mnt/storage2/vincent/football-pose/videos/output"
     )
     assert loaded.pitch_filter.enabled
-    assert loaded.pitch_filter.checkpoint == Path(
-        "/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt"
-    )
+    assert loaded.pitch_filter.checkpoint == ROBOFLOW_PITCH_CHECKPOINT
+
+
+def test_pitch_checkpoint_pin_rejects_changed_weights(tmp_path, tiny_video):
+    import yaml
+    from football_pose.artifacts import sha256_file
+
+    checkpoint = tmp_path / "pitch.pt"
+    checkpoint.write_bytes(b"selected pitch weights")
+    config = tmp_path / "pitch.yaml"
+    config.write_text(yaml.safe_dump({
+        "name": "pin", "input": str(tiny_video),
+        "pitch_filter": {"enabled": True, "checkpoint": str(checkpoint),
+                         "checkpoint_sha256": sha256_file(checkpoint)},
+    }))
+    assert load_config(config).pitch_filter.checkpoint == checkpoint
+    checkpoint.write_bytes(b"different weights or LFS pointer")
+    with pytest.raises(ValueError, match="pitch-filter checkpoint SHA-256 mismatch"):
+        load_config(config)
+
+
+def test_historical_pitch_comparisons_keep_retired_checkpoints():
+    earlier = load_config(REPOSITORY / "configs/lyra-pitch-weights-earlier.yaml", check_paths=False)
+    candidate = load_config(REPOSITORY / "configs/lyra-pitch-weights-new-1280.yaml", check_paths=False)
+    assert earlier.pitch_filter.checkpoint.name == "pitch-landmarks-best.pt"
+    assert candidate.pitch_filter.checkpoint.name == "best.pt"
+    assert earlier.pitch_filter.image_size == candidate.pitch_filter.image_size == 1280
+    assert earlier.pitch_filter.checkpoint != candidate.pitch_filter.checkpoint

@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from football_pose.archive import PREDICTION_SCHEMA, read_archive
 from football_pose.configuration import PitchFilterConfig
@@ -28,6 +29,42 @@ def test_weserstadion_landmark_geometry() -> None:
     assert PITCH_VERTICES[13].tolist() == [5250, 0]
     assert PITCH_VERTICES[9].tolist() == [1650, 1384]
     assert PITCH_VERTICES[21].tolist() == [9400, 3400]
+
+
+def test_selected_checkpoint_pin_and_cache_identity(tmp_path, tiny_video, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from football_pose.artifacts import sha256_file
+    from football_pose import pitch_filter
+
+    calls = []
+    class FakeModel:
+        def predict(self, images, **kwargs):
+            return [SimpleNamespace(keypoints=None, boxes=None) for _ in images]
+    def load(path):
+        calls.append(path)
+        return FakeModel()
+    monkeypatch.setitem(sys.modules, "ultralytics", SimpleNamespace(YOLO=load))
+    monkeypatch.setattr(pitch_filter, "_release_pitch_model", lambda _: None)
+    checkpoint = tmp_path / "pitch.pt"
+    checkpoint.write_bytes(b"old checkpoint")
+    config = PitchFilterConfig(enabled=True, checkpoint=checkpoint, checkpoint_sha256=sha256_file(checkpoint))
+    store = pitch_filter.PitchGeometryStore(tmp_path / "cache")
+    old = store.prepare(source_path=tiny_video, source_sha256="source", config=config)
+    previous_bytes = old.path.read_bytes()
+    cached = store.prepare(source_path=tiny_video, source_sha256="source", config=config)
+    assert cached.cache_hit and cached.identifier == old.identifier
+    assert len(calls) == 1
+    checkpoint.write_bytes(b"new selected checkpoint")
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        store.prepare(source_path=tiny_video, source_sha256="source", config=config)
+    assert len(calls) == 1
+    config.checkpoint_sha256 = sha256_file(checkpoint)
+    new = store.prepare(source_path=tiny_video, source_sha256="source", config=config)
+    assert not new.cache_hit and new.identifier != old.identifier
+    assert new.manifest.checkpoint_sha256 == config.checkpoint_sha256
+    assert old.path.read_bytes() == previous_bytes
+    assert len(calls) == 2
 
 
 def _prediction(

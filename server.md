@@ -88,6 +88,8 @@ Use `tee` below to keep complete logs; tmux scrollback is limited.
 | Existing OpenPose baseline results | `/home/vincent/football-pose-results/native-resolution` |
 | Existing preprocessing artifacts | `/home/vincent/football-pose-cache/artifacts` |
 | Existing pitch geometry cache | `/home/vincent/football-pose-cache/pitch` |
+| Production pitch checkpoint | `/mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt` |
+| New production pitch geometry cache | `/mnt/storage2/vincent/football-pose/cache/pitch` |
 | COCO dataset / cache / results | `/mnt/storage2/vincent/football-pose/{datasets/coco,cache/coco,results/coco-keypoints}` |
 | New pitch training / validation | `/mnt/storage2/vincent/football-pose/results/{pitch-training,pitch-validation}` |
 
@@ -159,7 +161,7 @@ config directory before editing, then run that copy to keep Git clean.
 ## 4. Run football experiments and render videos
 
 Current setup: **YOLO26x Pose** for people, **OpenPose BODY_25**, and a separate
-**YOLOv8 pitch-landmark model at 640**. Pose input settings are 1920 / 1920x1088
+**Roboflow YOLOv8x pitch-landmark model at 640/batch 1**. Pose input settings are 1920 / 1920x1088
 in these football configs. The single-step suite below also includes HRNet-W32,
 using the stored YOLO player detector for its required person boxes.
 
@@ -169,7 +171,46 @@ coordinates, and estimates same-frame geometry. The pitch is hardcoded as
 between person-preprocessing comparisons. Missing acceptable geometry is reported
 as unclassified, not a reliable rectangular pitch estimate.
 
-### Pitch-only comparison: production vs Roboflow sports
+### Selected production pitch model (2026-10-21)
+
+After video review of `20261021T145819Z-1713c4a9`, Roboflow is the production pitch
+model for all active football YAML and the full three-model screen. It had accepted
+fits on 782/782 frames versus 306/782 for the retired nano. This is not an accuracy
+metric or a claim that the earlier dataset-validation discrepancy is resolved.
+
+**No copying/overwriting of weights is needed.** Active configs now point directly
+at the already downloaded Roboflow file on mounted storage. They pin its SHA-256
+and use the reviewed 640/batch-1 protocol with the 105x68 m Weserstadion template,
+confidence 0.25/0.5, the same fit checks and zero temporal fallback. Keep the old
+`pitch-landmarks-best.pt`, training outputs and comparison results for reproduction.
+Do not use the two historical `lyra-pitch-weights-*.yaml` configs for production.
+
+If using a **private YAML copy**, update its pitch section as well (retain its
+other fit/filter settings and choose the physical device as usual):
+
+```yaml
+pitch_filter:
+  enabled: true
+  checkpoint: /mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt
+  checkpoint_sha256: 28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36
+  cache_root: /mnt/storage2/vincent/football-pose/cache/pitch
+  image_size: 640
+  batch_size: 1
+  detection_confidence: 0.25
+  landmark_confidence: 0.5
+  max_fallback_frames: 0
+```
+
+After pulling the updated code, rerun the single-step screen below. Preflight
+checks the pinned file; a checksum mismatch must be resolved before running.
+No container rebuild is needed. Preprocessing caches may be reused, but the
+screen creates a fresh timestamped run with new pose jobs/decisions/videos.
+New pitch geometry is keyed by the actual weights/settings; do not delete old
+caches. Compare against the new run's baseline, not the old nano-filtered counts.
+The previous OpenPose crop failure and anomalous raw YOLO-crop/HRNet-tile yields
+are separate unresolved issues, not something a pitch-model swap fixes.
+
+### Pitch-only comparison: retired nano vs Roboflow sports
 
 This is separate from the 36-job person-pose screen. It runs no player detector,
 OpenPose or HRNet and never replaces production weights. Both pitch checkpoints
@@ -225,16 +266,18 @@ export CUDA_VISIBLE_DEVICES=7
 set -o pipefail
 mkdir -p /mnt/storage2/vincent/football-pose/results/logs
 .venv/bin/python -u -m football_pose compare-pitch \
-  configs/lyra-openpose-full-frame.yaml \
+  configs/lyra-pitch-weights-earlier.yaml \
   --reference-checkpoint /mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt \
   --output-root /mnt/storage2/vincent/football-pose/results/pitch-comparison \
   --device 7 \
   2>&1 | tee /mnt/storage2/vincent/football-pose/results/logs/pitch-comparison-$(date +%Y%m%dT%H%M%S).log
 ```
 
-The existing YAML supplies only the input video, our production pitch checkpoint
+The historical YAML supplies only the input video, the retired nano checkpoint
 and fit thresholds; its OpenPose/model/processor settings are not run. The command
 overrides both pitch devices, image size, batch and confidence settings equally.
+Using an active production YAML instead would now select Roboflow on both sides;
+the command explicitly warns when the checkpoint files are identical.
 Progress names each checkpoint and reports rendering every 100 frames. Detach with
 Ctrl+B, D; reconnect using `tmux attach -t pitch-comparison`.
 
@@ -509,15 +552,17 @@ Here `device=0` means the GPU exposed by that export.
 
 | Checkpoint | Location / role |
 | --- | --- |
-| Production | `/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt` |
+| Production Roboflow YOLOv8x | `/mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt` |
+| Retired nano production (preserve) | `/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt` |
 | Preserved nano reference | `/home/vincent/football-pose-private/checkpoints/pitch-v8n-reference.pt` |
-| Selected fine-tuned candidate | `/mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt` |
+| Historical nano fine-tuned candidate | `/mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt` |
 
-The selected YOLOv8n candidate reported pose mAP50 **0.995**, mAP50–95 **0.844**
+The retired YOLOv8n candidate reported pose mAP50 **0.995**, mAP50–95 **0.844**
 on 34 validation images; the additional 20 epochs did not improve it.
-The supplied PitchVision x checkpoint performed worse on this validation set.
-Do **not** replace production with the local `models/pitch_detection_model/weights/best.pt`
-merely because it is named `best.pt`; that file contains the different x candidate.
+The Roboflow/PitchVision x checkpoint performed worse on that validation set but
+was selected after the full-video comparison and user review. Keep both results;
+the discrepancy is unresolved. Use the checksum-pinned production file, not an
+arbitrary checkpoint called `best.pt`.
 
 ### Validate the current production checkpoint
 
@@ -525,60 +570,62 @@ merely because it is named `best.pt`; that file contains the different x candida
 mkdir -p /mnt/storage2/vincent/football-pose/results/pitch-validation
 set -o pipefail
 yolo pose val \
-  model=/home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt \
+  model=/mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt \
   data=/home/vincent/football-pose-private/pitch-training/pitch-production-data.yaml \
   imgsz=640 batch=2 device=0 split=val \
   project=/mnt/storage2/vincent/football-pose/results/pitch-validation \
-  name=pitch-v8n-640 \
-  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-validation/pitch-v8n-640.txt
+  name=roboflow-v8x-640 \
+  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-validation/roboflow-v8x-640.txt
 ```
 
 Read the **Pose** columns, not the first four Box columns. Confirm the printed
-model summary is YOLOv8n-pose. The normalized YAML points to the existing
+model summary is YOLOv8x-pose. The normalized YAML points to the existing
 `/home/vincent/football-pose-private/datasets/football-field-detection-15`
 dataset. Use the same images, split and settings when comparing checkpoints.
 
 ### Start another fine-tuning cycle only when wanted
 
+This is optional research, not part of installing/rerunning production. Confirm
+dataset landmark identity/order before training; never train into the reference
+checkpoint directory. The existing training helper's nano default is historical:
+pass the selected backbone/weights explicitly for any new experiment.
+
 ```bash
 mkdir -p /mnt/storage2/vincent/football-pose/results/pitch-training
 set -o pipefail
 yolo pose train \
-  model=/home/vincent/football-pose-private/checkpoints/pitch-v8n-reference.pt \
+  model=/mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt \
   data=/home/vincent/football-pose-private/pitch-training/pitch-production-data.yaml \
   imgsz=640 batch=8 epochs=100 device=0 \
   optimizer=AdamW lr0=0.0001 lrf=0.1 patience=20 mosaic=0.0 \
   seed=0 deterministic=True workers=4 \
   project=/mnt/storage2/vincent/football-pose/results/pitch-training \
-  name=pitch-v8n-finetune-640 \
-  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-640.txt
+  name=pitch-roboflow-candidate-640 \
+  2>&1 | tee /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-roboflow-candidate-640.txt
 ```
 
 Use the printed save directory: repeated runs get numbered suffixes.
 Training uses 255 images; validation uses 34; leave the 28 test images held out.
 For another 20-epoch cycle, start from the selected candidate, use
-`epochs=20 lr0=0.00001 name=pitch-v8n-extra20-640`. Finished checkpoints have
+`epochs=20 lr0=0.00001 name=pitch-roboflow-extra20-640`. Finished checkpoints have
 stripped optimizer state, so this is new fine-tuning, not `resume=True`.
 Validate candidates and inspect moving-camera video before adopting them.
 
-### Keep the selected candidate in the production slot
+### Keep the selected production weights immutable
 
-This intentionally replaces the production checkpoint; the reference and training
-candidate remain intact. Run only when selecting this candidate for production:
+Do not copy a nano candidate over either production or reference files. Verify
+the production identity instead:
 
 ```bash
-cp -v \
-  /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt \
-  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
-sha256sum \
-  /mnt/storage2/vincent/football-pose/results/pitch-training/pitch-v8n-finetune-6402/weights/best.pt \
-  /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
+printf '%s  %s\n' \
+  28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36 \
+  /mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt \
+  | sha256sum --check -
 ```
 
-Hashes must match. Rerun section 4 in `pitch-pipeline-review` tmux to inspect
-pitch landmarks/boundaries with OpenPose. No container rebuild is needed for
-changed pitch weights. Good validation scores do not guarantee accurate geometry
-on the football video.
+Expect `OK`. A future promotion requires an explicit new versioned path and SHA
+in active configs, followed by full-video review. It does not happen automatically
+after training. Good validation scores do not guarantee accurate video geometry.
 
 For a new dataset, upload the full export to mounted `datasets/pitch/`.
 The existing [training script](train/train_pitch_server.py) normalizes split paths:
@@ -752,7 +799,8 @@ cd /home/vincent/projects/Bremen
 
 Expected BODY_25 SHA-256:
 `44e3d7ebd8c8b62d4366d67127f1b562611a9e8fd0f4f3cdeeb4bb4a6ed12be6`.
-Use the selected trained pitch checkpoint from section 6, not generic COCO weights.
+Use the checksum-pinned Roboflow pitch checkpoint from section 4, not generic
+COCO pose weights or a retired nano candidate.
 
 ### Update existing code (Lyra, before starting jobs)
 

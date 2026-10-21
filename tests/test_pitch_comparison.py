@@ -91,7 +91,8 @@ def _config(tmp_path, tiny_video):
         "name": "pitch", "input": str(tiny_video),
         # A missing pose model must not be required for pitch-only comparison.
         "models": [{"id": "unused", "command": ["unused"], "checkpoint": "absent.pt"}],
-        "pitch_filter": {"enabled": True, "checkpoint": str(ours), "image_size": 1280},
+        "pitch_filter": {"enabled": True, "checkpoint": str(ours), "image_size": 1280,
+                         "checkpoint_sha256": comparison.sha256_file(ours)},
     }))
     return path, ours
 
@@ -128,6 +129,29 @@ def test_comparison_freezes_protocol_preserves_weights_and_records_identical_fil
                and c.max_fallback_frames == 0 and c.landmark_confidence == .5 for c in calls)
     assert calls[0].checkpoint == ours
     assert calls[1].checkpoint == reference
+    assert all(config.checkpoint_sha256 == comparison.sha256_file(config.checkpoint) for config in calls)
+
+
+def test_different_reference_uses_its_own_pin_not_the_production_pin(tmp_path, tiny_video, monkeypatch):
+    config, ours = _config(tmp_path, tiny_video)
+    reference = tmp_path / "reference.pt"
+    reference.write_bytes(b"different reference")
+    monkeypatch.setattr(comparison, "REFERENCE_SHA256", comparison.sha256_file(reference))
+    monkeypatch.setattr(comparison, "checkpoint_metadata", lambda _: {"task": "pose", "kpt_shape": [32, 3]})
+    monkeypatch.setattr(comparison, "collect_provenance", lambda: {})
+    def prepare(self, *, source_path, source_sha256, config):
+        assert config.checkpoint_sha256 == comparison.sha256_file(config.checkpoint)
+        geometry = _geometry(tmp_path)
+        geometry.manifest.checkpoint_sha256 = config.checkpoint_sha256
+        return geometry
+    monkeypatch.setattr(comparison.PitchGeometryStore, "prepare", prepare)
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "7")
+    path = comparison.compare_pitch(config, reference_checkpoint=reference, output_root=tmp_path / "results", device=7)
+    report = json.loads(path.read_text())
+    assert report["success"] and not report["identical_checkpoints"]
+    assert "checkpoint_sha256" not in report["settings"]
+    assert report["models"]["ours"]["sha256"] == comparison.sha256_file(ours)
+    assert report["models"]["roboflow"]["sha256"] == comparison.sha256_file(reference)
 
 
 def test_cli_missing_reference_is_actionable_and_creates_no_output(tmp_path, tiny_video, monkeypatch):

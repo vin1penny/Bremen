@@ -8,11 +8,12 @@ video_output:
 
 pitch_filter:
   enabled: true
-  checkpoint: /home/vincent/football-pose-private/checkpoints/pitch-landmarks-best.pt
-  cache_root: /home/vincent/football-pose-cache/pitch
+  checkpoint: /mnt/storage2/vincent/football-pose/models/pitch-reference/roboflow-football-pitch.pt
+  checkpoint_sha256: 28f68f7c4056d6d9b137efd2e7ab5f3c494039380c63831649126ced25628b36
+  cache_root: /mnt/storage2/vincent/football-pose/cache/pitch
   device: "0"
   image_size: 640
-  batch_size: 16
+  batch_size: 1
   detection_confidence: 0.25
   landmark_confidence: 0.5
   minimum_landmarks: 4

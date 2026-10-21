@@ -451,6 +451,8 @@ class ExperimentRunner:
                 {
                     "enabled": True,
                     "geometry_id": pitch_geometry.identifier,
+                    "checkpoint": str(self.config.pitch_filter.checkpoint),
+                    "checkpoint_sha256": pitch_geometry.manifest.checkpoint_sha256,
                     "geometry": str(pitch_geometry.path),
                     "cache_hit": pitch_geometry.cache_hit,
                     "geometry_wall_seconds": pitch_geometry_wall,

@@ -63,17 +63,18 @@ class PitchFilterConfig(BaseModel):
 
     enabled: bool = False
     checkpoint: Path | None = None
+    checkpoint_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     cache_root: Path = Path("pitch-cache")
     device: str = "0"
     image_size: int = Field(default=640, ge=32)
-    batch_size: int = Field(default=16, ge=1)
+    batch_size: int = Field(default=1, ge=1)
     detection_confidence: float = Field(default=0.25, ge=0.0, le=1.0)
     landmark_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     minimum_landmarks: int = Field(default=4, ge=4, le=32)
     ransac_threshold_cm: float = Field(default=150.0, gt=0.0)
     minimum_inlier_ratio: float = Field(default=0.6, gt=0.0, le=1.0)
     maximum_median_reprojection_cm: float = Field(default=200.0, gt=0.0)
-    max_fallback_frames: int = Field(default=5, ge=0)
+    max_fallback_frames: int = Field(default=0, ge=0)
     pitch_margin_cm: float = Field(default=50.0, ge=0.0)
     pitch_bbox_margin_px: float = Field(default=10.0, ge=0.0)
     ankle_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
@@ -183,18 +184,25 @@ def validate_config_paths(config: ExperimentConfig) -> None:
                 raise FileNotFoundError(
                     f"{name} checkpoint for model {model.id!r} does not exist: {checkpoint}"
                 )
-    if (
-        config.pitch_filter.enabled
-        and config.pitch_filter.checkpoint is not None
-        and not config.pitch_filter.checkpoint.is_file()
-    ):
-        raise FileNotFoundError(
-            "pitch-filter checkpoint does not exist: "
-            f"{config.pitch_filter.checkpoint}"
-        )
+    if config.pitch_filter.enabled:
+        validate_pitch_checkpoint(config.pitch_filter)
     for processor in config.processors:
         for checkpoint in _parameter_checkpoints(processor.params):
             if not checkpoint.is_file():
                 raise FileNotFoundError(
                     f"checkpoint for processor {processor.type!r} does not exist: {checkpoint}"
                 )
+
+
+def validate_pitch_checkpoint(config: PitchFilterConfig) -> str:
+    """Check the selected file identity before accepting cached or fresh geometry."""
+    from football_pose.artifacts import sha256_file
+
+    if config.checkpoint is None:
+        raise ValueError("pitch-filter checkpoint is required")
+    if not config.checkpoint.is_file():
+        raise FileNotFoundError(f"pitch-filter checkpoint does not exist: {config.checkpoint}")
+    actual = sha256_file(config.checkpoint)
+    if config.checkpoint_sha256 is not None and actual != config.checkpoint_sha256:
+        raise ValueError(f"pitch-filter checkpoint SHA-256 mismatch: {config.checkpoint}; use the selected, verified weights")
+    return actual

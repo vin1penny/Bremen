@@ -1,3 +1,4 @@
+# Historical retired-nano comparison only. Active runs use pinned Roboflow weights.
 name: lyra-pitch-weights-earlier
 input: /mnt/storage2/vincent/football-pose/videos/input/sample_30.mov
 output_dir: /home/vincent/football-pose-results/pitch-weight-comparison/earlier
