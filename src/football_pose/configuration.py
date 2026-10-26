@@ -54,6 +54,7 @@ class VideoOutputConfig(BaseModel):
     keypoint_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
     draw_bboxes: bool = True
     draw_regions: bool = True
+    draw_radar: bool = True
 
 
 class PitchFilterConfig(BaseModel):
@@ -78,6 +79,7 @@ class PitchFilterConfig(BaseModel):
     pitch_margin_cm: float = Field(default=50.0, ge=0.0)
     pitch_bbox_margin_px: float = Field(default=10.0, ge=0.0)
     ankle_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
+    location_keypoint_confidence: float = Field(default=0.2, ge=0.0, le=1.0)
     deduplication_iou: float = Field(default=0.5, gt=0.0, le=1.0)
 
     @model_validator(mode="after")

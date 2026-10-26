@@ -15,6 +15,36 @@ from football_pose.preprocessing import REGISTRY
 app = typer.Typer(no_args_is_help=True, help="Run modular football pose experiments.")
 
 
+@app.command("render-videos")
+def render_saved_videos(
+    report: Path,
+    output_root: Path = typer.Option(..., help="Mounted destination for new videos; no model inference."),
+) -> None:
+    from football_pose.visualization import render_report_videos
+
+    try:
+        path = render_report_videos(report, output_root)
+    except (ValueError, OSError, KeyError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"Video index: {path}")
+
+
+@app.command("export-pitch-locations")
+def export_locations(
+    report: Path,
+    output_root: Path = typer.Option(..., help="Destination on mounted storage; no GPU inference."),
+) -> None:
+    from football_pose.pitch_locations import export_report_locations
+
+    try:
+        path = export_report_locations(report, output_root)
+    except (ValueError, OSError, KeyError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    typer.echo(f"Location exports: {path}")
+
+
 @app.command("compare-pitch")
 def compare_pitch_models(
     config: Path,

@@ -504,15 +504,111 @@ Newest summary may be a failed run; check success/status before downloading.
 | `archive/manifest.json` | Archive metadata |
 | `predictions-on-pitch.parquet` | Accepted, deduplicated on-pitch records |
 | `pitch-decisions.parquet` | Per-record inside/outside/unclassified/duplicate decisions |
+| `player-locations.parquet` / `.csv` | Estimated player ground location in metres, frame/timestamp, IDs and `kept` flag |
+| `keypoint-pitch-projections.parquet` | 17 image-joint projections per raw pose; pitch-plane intersections, **not 3D joints** |
+| Location `manifest.json` | Coordinate convention, input hashes, confidence threshold and limitations |
 | `pitch-filter/.../manifest.json` | Pitch-filter counts/settings |
 | `runner/attempt-*/shard-*.stdout.log` / `stderr.log` | Model diagnostics |
 | MP4 on mounted storage | Poses, predicted pitch landmarks and estimated boundaries |
 
 Video colors: magenta pitch landmarks, cyan boundary, green inside, red outside,
 yellow unclassified (`unavailable` in decisions), gray duplicates.
+New videos also include a small pitch at the bottom centre: green dots are this
+frame's deduplicated on-pitch player ground locations, matching the location export.
+No valid pitch fit means no dots and an unavailable label; positions are never
+frozen from the previous frame. Dots have no team colors or persistent identities.
+To disable the inset, set `video_output.draw_radar: false` (default: `true`).
 Counts are detection-yield diagnostics, **not accuracy**;
 overlapping tiles can create duplicates. `usable_frames / frame_count` measures
 accepted pitch-geometry coverage, not landmark accuracy.
+
+### Export pitch coordinates (no model rerun or GPU needed)
+
+New pipeline runs automatically write location files and list them under
+`jobs[].outputs.player_locations`, `player_locations_csv`,
+`keypoint_pitch_projections` and `pitch_locations_manifest`.
+The screening suite does this for every completed model and processing condition.
+
+For the existing complete suite, **on Lyra after the updated code is installed**:
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+tmux new -A -s pitch-locations
+```
+
+Inside tmux, activate the venv again if needed, then run:
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+.venv/bin/python -u -m football_pose export-pitch-locations \
+  /mnt/storage2/vincent/football-pose/results/football/single-step/20261022T181655Z-fefcb4ec/screening.json \
+  --output-root /mnt/storage2/vincent/football-pose/results/pitch-locations/20261022
+```
+
+This reads the saved raw Parquet, pitch decisions and per-frame geometry. No
+weights/video decoding/GPU reservation are needed. Failed jobs are skipped; missing
+required files are reported instead of starting inference. Use another report path
+for another run; a single experiment's `summary.json` is also accepted.
+Existing reports are untouched. The printed `locations-*.json` index lists every
+completed job and its new location files, grouped into content-addressed directories.
+Ctrl+B then D detaches; `tmux attach -t pitch-locations` reconnects.
+
+Coordinates: **metres, 105 × 68 m, Weserstadion only**, P0 origin; x toward P24,
+y toward P5. Source pixels are already original-frame coordinates, not 640-input
+pixels. Missing fits or unreliable joints have null coordinates, not zero.
+Select `kept=true` for deduplicated on-pitch players. Body-joint projections are
+not true 3D or vertical ground projections. Track IDs are not created. The optional
+YAML field `pitch_filter.location_keypoint_confidence` defaults to `0.2`.
+
+Download all location files, **in a local Mac terminal**, not inside SSH:
+
+```bash
+mkdir -p /Users/larry/Downloads/thesis
+scp -r vincent@lyra:/mnt/storage2/vincent/football-pose/results/pitch-locations/20261022 \
+  /Users/larry/Downloads/thesis/
+```
+
+### Add the miniature pitch to existing videos (CPU-only)
+
+After installing the updated code, **on Lyra**:
+
+```bash
+tmux new -A -s radar-videos
+```
+
+Inside that session:
+
+```bash
+cd /home/vincent/projects/Bremen
+source .venv/bin/activate
+export PYTHONPATH="$PWD/src"
+.venv/bin/python -u -m football_pose render-videos \
+  /mnt/storage2/vincent/football-pose/results/football/single-step/20261022T181655Z-fefcb4ec/screening.json \
+  --output-root /mnt/storage2/vincent/football-pose/videos/output/radar-20261022
+```
+
+This re-renders each completed model/condition from saved predictions and pitch
+geometry, generating the location exports as needed. It does **not** run the models
+again and needs no GPU reservation. Source video, preprocessing cache, Parquet,
+pitch decisions and geometry must still exist. Failed jobs are skipped. A single
+`summary.json` can replace `screening.json` to render just one experiment.
+The printed `videos-*.json` index lists condition, model and new MP4 path. Repeating
+the command reuses identical renders. Old reports and videos are preserved.
+Keep `draw_radar` enabled in that saved report's video settings (older reports that
+omit it get the new default). Ctrl+B then D detaches; reconnect with
+`tmux attach -t radar-videos`.
+
+**On the Mac**, download the complete rendered set (MP4s, index and locations):
+
+```bash
+mkdir -p /Users/larry/Downloads/thesis
+scp -r vincent@lyra:/mnt/storage2/vincent/football-pose/videos/output/radar-20261022 \
+  /Users/larry/Downloads/thesis/
+```
 
 **Automated overview on Lyra:**
 

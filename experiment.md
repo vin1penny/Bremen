@@ -326,10 +326,69 @@ weights (the command warns explicitly). Do not repoint historical configs.
 Commands, mounted paths, tmux and downloads are in `server.md` under
 "Pitch-only comparison: retired nano vs Roboflow sports".
 
-Later, adapt the upstream radar stage: detected player ground points -> same-frame
-image-to-pitch homography -> metre coordinates -> miniature 2D pitch. That stage,
-player tracking and tracking-data evaluation are deliberately not part of this
-pitch-checkpoint check, and still require the correct venue geometry/conventions.
+The coordinate-export stage now adapts the upstream radar's mapping principle:
+detected image points -> same-frame image-to-pitch homography -> metre coordinates.
+The annotated videos now include a miniature 2D pitch radar. Player association
+over time and tracking-data evaluation remain separate future stages; exports and
+radar do not generate track IDs or assume a DFL coordinate convention.
+
+### Player locations and per-joint pitch-plane projections
+
+With `pitch_filter.enabled: true`, every model/processing condition automatically
+exports locations after filtering, without changing the canonical raw predictions,
+pose weights, pitch inference or detection counts. This also applies to screening.
+The source is the **accepted homography for that original frame**, shared across
+conditions. Rejected/missing fits produce null coordinates, not a static rectangle
+or an interpolated position. Configured fallback fits, if enabled, are labelled
+`geometry_source=fallback`; production defaults to no fallback.
+
+Mapping uses the same projective principle as `sports/common/view.py` and
+`render_radar()` in the reference Football-PitchVision/Roboflow project:
+`[u, v, w] = H_frame @ [image_x, image_y, 1]`, then
+`pitch_x_m = (u/w)/100`, `pitch_y_m = (v/w)/100`.
+Our cached homography outputs centimetres, hence the division by 100. Canonical
+predictions already reverse resize/tile/crop transforms into **original-frame
+pixels**; do not rescale them to/from the pitch model's 640 input again.
+
+| Export | Rows / meaning |
+| --- | --- |
+| `player-locations.parquet` and `.csv` | One per raw person-pose: estimated ground location, image anchor, timestamp, IDs, classification and fit diagnostics |
+| `keypoint-pitch-projections.parquet` | Exactly 17 per raw pose, COCO joint index/name, confidence, original pixel location and pitch-plane projection in metres |
+| Location `manifest.json` | Units, origin, limitations, checkpoint/geometry/input hashes, confidence threshold, counts and file paths |
+
+Coordinates are **Weserstadion, Bremen only, 105 × 68 m**. Origin is landmark P0;
+x increases toward P24 along the length, y toward P5 along the width. This is the
+landmark-template orientation, not automatically a team's attacking direction.
+Conversion to a centred/mirrored tracking system requires its documented convention.
+Coordinates outside the rectangle are retained, never clamped to the touchline.
+
+The player anchor is unchanged: confident ankle midpoint, one confident ankle, then
+bbox bottom centre (or the existing keypoint-centroid last resort when no box can
+be formed). Upstream radar instead always uses bbox bottom centre. Ankle anchors
+are estimates, not guaranteed ground contact, particularly during a jump.
+
+**A pitch homography cannot recover true 3D body-joint positions.** Head, hip and
+hand outputs are intersections of their image rays with the pitch plane, not true
+joint locations or vertical ground projections. Use `player-locations` for player
+ground-position comparisons; retain original-frame joints for 2D pose evaluation.
+Do not treat these exports as new ground truth or a change to the thesis metrics.
+
+`pitch_filter.location_keypoint_confidence` defaults to `0.2`; joints below it or
+with zero confidence retain their pixels/confidence but have null pitch coordinates
+and `projection_status=low_confidence`. Other statuses are `projected`, `no_geometry`
+and `invalid_projection` (e.g. projective horizon). Missing values are not `(0,0)`.
+The player row's `classification` and `kept` come from the existing pitch decision.
+Select `kept=true` for the deduplicated on-pitch subset; outside/duplicate/unavailable
+rows are retained for audit. `person_id` identifies a detection, **not** a persistent
+player; `track_id` is only preserved if already supplied upstream.
+
+Every row includes model/pipeline/video/source/person IDs, frame index, video
+timestamp, crop/track IDs and geometry diagnostics. `prediction_index` refers to
+the row in that job's raw Parquet. Location artifacts are content-addressed by the
+prediction/decision/geometry hashes, mapping implementation, pitch size and joint
+threshold. Raw predictions, videos and old reports are not overwritten by backfill.
+The CPU-only `export-pitch-locations` command accepts either one `summary.json` or
+an entire `screening.json`; see `server.md` for commands and mounted output paths.
 
 ## Experiment stages
 
@@ -510,7 +569,12 @@ OUTPUT_DIR/
     │   └── pitch-filter/FILTER_SETTINGS_ID/
     │       ├── manifest.json
     │       ├── pitch-decisions.parquet
-    │       └── predictions-on-pitch.parquet
+    │       ├── predictions-on-pitch.parquet
+    │       └── locations/LOCATION_SETTINGS_ID/
+    │           ├── manifest.json
+    │           ├── player-locations.parquet
+    │           ├── player-locations.csv
+    │           └── keypoint-pitch-projections.parquet
     └── runner/
         ├── predictions.jsonl
         └── attempt-01-batch-N/
@@ -536,6 +600,9 @@ base contains three models and therefore produces three job directories per cond
 | `pitch-filter/*/predictions-on-pitch.parquet` | Deduplicated poses classified inside the pitch | Input for on-pitch player metrics |
 | `pitch-filter/*/pitch-decisions.parquet` | One decision for every raw pose | Audit inside/outside/duplicate/unavailable classifications, anchors, and methods |
 | `pitch-filter/*/manifest.json` | Filter settings, geometry path, and counts | Reproduce and interpret the filtered archive |
+| `locations/*/player-locations.parquet` / `.csv` | Ground-anchor locations in metres with source pixels and timestamps | Player-location analysis; use `kept=true` for deduplicated on-pitch poses |
+| `locations/*/keypoint-pitch-projections.parquet` | All COCO-17 joints projected to the pitch plane | Diagnostic geometry, **not true 3D joint locations** |
+| `locations/*/manifest.json` | Location hashes, coordinate convention, thresholds and limitations | Reproduce and interpret the exports |
 | `runner/predictions.jsonl` | Merged raw runner predictions | Human-readable debugging and conversion source |
 | `runner/attempt-*/shard-*.jsonl` | Predictions produced by one execution shard | Diagnose sharding and merge behavior |
 | `runner/attempt-*/*.log` | Model-container standard output and errors | Diagnose warnings, crashes, CUDA errors, and dependency problems |
@@ -549,6 +616,28 @@ outside-pitch poses red, cross-tile duplicates gray, and unavailable classificat
 yellow. The cyan polygon shows the accepted frame-specific pitch region. The upper-left
 label reports raw, on-pitch, outside, duplicate, and unknown counts. Videos contain no
 audio and do not replace the Parquet predictions or later quantitative metrics.
+
+`video_output.draw_radar` defaults to `true`. When pitch geometry is enabled, a
+bottom-centred, uniformly scaled 105 × 68 m pitch displays the **same estimated
+player ground locations as `player-locations.parquet`**, one dot for every
+`kept=true`, `projection_status=projected` row in that frame. Outside, duplicate and
+unmapped poses are not plotted. A failed fit shows `PITCH FIT UNAVAILABLE` and no
+dots; zero detections with a valid fit shows `ON-PITCH 0`. No previous positions
+are carried forward. Configured fallback geometry is labelled `FALLBACK FIT`.
+All dots are green to match on-pitch skeletons: team/identity inference is not
+implemented, so unlike the upstream radar there are no invented team colors.
+This plots player ground anchors, not projected heads/hands or a miniature skeleton.
+
+The inset uses P0 at its top-left, x right and y down, following the coordinate
+export's template orientation, with pitch/goal areas and centre markings. It is an
+overlay, not a resolution reduction; source frame dimensions, rate and count remain
+unchanged. Frames smaller than 320 × 200 omit the inset to avoid an illegible panel.
+Set `draw_radar: false` to disable it. Renderer changes get a new video-settings ID
+so an old MP4 cannot silently satisfy a new render. The CPU-only `render-videos`
+command can render existing experiment/screening reports to a new mounted folder,
+generating locations if necessary, without rerunning pose or pitch inference or
+overwriting the original reports/videos. Saved source video, artifact, raw Parquet,
+pitch decisions and geometry must still exist; see `server.md`.
 
 The configuration name, experiment ID, job ID, and video-settings ID in the path keep
 videos from different processing pipelines, checkpoints, and rendering settings from
@@ -623,6 +712,8 @@ tile records must be deduplicated before being compared with ground truth.
 - `src/football_pose/artifacts.py`: immutable lossless inputs shared by the models.
 - `src/football_pose/pitch_filter.py`: cached pitch geometry, cross-tile deduplication,
   ground-point classification, and filtered archives.
+- `src/football_pose/pitch_locations.py`: automatic metre-coordinate exports and
+  CPU-only backfill from saved experiment/screening reports.
 - `runners/`: isolated YOLO Pose, HRNet-W32, and OpenPose adapters.
 - `src/football_pose/hrnet_input.py`: existing YOLO player detector → person crops
   for HRNet, with automatic reuse of shared person-crop artifacts.

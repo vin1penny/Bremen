@@ -18,10 +18,12 @@ import numpy as np
 import pyarrow.parquet as pq
 
 from football_pose.archive import read_archive
-from football_pose.artifacts import iter_artifact
+from football_pose.artifacts import iter_artifact, sha256_file, stable_hash
 from football_pose.configuration import VideoOutputConfig
 from football_pose.domain import FramePacket
+from football_pose.pitch_filter import PITCH_LENGTH_CM, PITCH_WIDTH_CM
 from football_pose.video import VideoSource
+from football_pose.jobs import atomic_write_json
 
 
 COCO_SKELETON = (
@@ -174,6 +176,78 @@ def _draw_pitch_keypoints(image: np.ndarray, points: list[dict], thickness: int)
                     0.4 * thickness, (255, 0, 255), thickness)
 
 
+def _radar_canvas() -> tuple[np.ndarray, float, tuple[int, int]]:
+    """Fixed, uniformly scaled Weserstadion template in metre coordinates."""
+    scale = 4.0
+    origin = (24, 42)
+    length, width = PITCH_LENGTH_CM / 100., PITCH_WIDTH_CM / 100.
+    panel = np.full((int(width * scale) + 82, int(length * scale) + 48, 3),
+                    (28, 60, 32), dtype=np.uint8)
+    white = (220, 235, 220)
+
+    def point(x: float, y: float) -> tuple[int, int]:
+        return round(origin[0] + x * scale), round(origin[1] + y * scale)
+
+    def rectangle(x1, y1, x2, y2):
+        cv2.rectangle(panel, point(x1, y1), point(x2, y2), white, 1, cv2.LINE_AA)
+
+    rectangle(0, 0, length, width)
+    cv2.line(panel, point(length / 2, 0), point(length / 2, width), white, 1, cv2.LINE_AA)
+    cv2.circle(panel, point(length / 2, width / 2), round(9.15 * scale), white, 1, cv2.LINE_AA)
+    cv2.circle(panel, point(length / 2, width / 2), 2, white, -1)
+    for left in (True, False):
+        start, end = (0., 16.5) if left else (length - 16.5, length)
+        rectangle(start, (width - 40.32) / 2, end, (width + 40.32) / 2)
+        start, end = (0., 5.5) if left else (length - 5.5, length)
+        rectangle(start, (width - 18.32) / 2, end, (width + 18.32) / 2)
+        start, end = (-2., 0.) if left else (length, length + 2.)
+        rectangle(start, (width - 7.32) / 2, end, (width + 7.32) / 2)
+        cv2.circle(panel, point(11. if left else length - 11., width / 2), 2, white, -1)
+    cv2.putText(panel, "105 x 68 m | P0 top-left | x right, y down", (14, panel.shape[0] - 13),
+                cv2.FONT_HERSHEY_SIMPLEX, .36, white, 1, cv2.LINE_AA)
+    return panel, scale, origin
+
+
+def _draw_radar(
+    image: np.ndarray, locations: list[dict[str, Any]], *,
+    geometry_source: str, template: tuple[np.ndarray, float, tuple[int, int]],
+) -> None:
+    """Bottom-centred live ground positions, not skeletons or inferred team labels."""
+    height, width = image.shape[:2]
+    if width < 320 or height < 200:
+        return  # Tiny diagnostic fixtures cannot accommodate a legible inset.
+    base, scale, origin = template
+    panel = base.copy()
+    available = geometry_source in {"observed", "fallback"}
+    plotted = 0
+    if available:
+        for row in locations:
+            if not row["kept"] or row["projection_status"] != "projected":
+                continue
+            x, y = row["pitch_x_m"], row["pitch_y_m"]
+            if x is None or y is None or not np.isfinite([x, y]).all():
+                continue
+            point = round(origin[0] + x * scale), round(origin[1] + y * scale)
+            # Preserve the filter's small pitch margin; never clamp to a boundary.
+            if not (4 <= point[0] < panel.shape[1] - 4 and
+                    origin[1] - 8 <= point[1] < panel.shape[0] - 30):
+                continue
+            cv2.circle(panel, point, 6, (0, 0, 0), -1, cv2.LINE_AA)
+            cv2.circle(panel, point, 4, (60, 220, 60), -1, cv2.LINE_AA)
+            plotted += 1
+    title = (f"ON-PITCH {plotted}" if available else "PITCH FIT UNAVAILABLE")
+    if geometry_source == "fallback":
+        title += " | FALLBACK FIT"
+    cv2.putText(panel, title, (14, 25), cv2.FONT_HERSHEY_SIMPLEX, .54,
+                (235, 245, 235) if available else (0, 210, 255), 1, cv2.LINE_AA)
+    margin = max(6, round(width / 160))
+    factor = min(width * .28 / panel.shape[1], height * .32 / panel.shape[0])
+    panel_width, panel_height = round(panel.shape[1] * factor), round(panel.shape[0] * factor)
+    panel = cv2.resize(panel, (panel_width, panel_height), interpolation=cv2.INTER_AREA)
+    x1, y1 = (width - panel_width) // 2, height - panel_height - margin
+    image[y1:y1 + panel_height, x1:x1 + panel_width] = panel
+
+
 def _draw_predictions(
     image: np.ndarray,
     predictions: list[dict[str, Any]],
@@ -261,6 +335,7 @@ def render_annotated_video(
     settings: VideoOutputConfig,
     decision_parquet: str | Path | None = None,
     pitch_geometry_json: str | Path | None = None,
+    player_locations_parquet: str | Path | None = None,
 ) -> VideoRenderResult:
     """Render processed frames plus raw model predictions to an MP4 file."""
 
@@ -283,15 +358,30 @@ def render_annotated_video(
             ] = str(decision["classification"])
     pitch_polygons: dict[int, list[list[float]]] = {}
     pitch_keypoints: dict[int, list[dict]] = {}
+    geometry_sources: dict[int, str] = {}
     if pitch_geometry_json is not None:
         geometry_payload = json.loads(
             Path(pitch_geometry_json).read_text(encoding="utf-8")
         )
         for geometry_frame in geometry_payload.get("frames", []):
+            geometry_sources[int(geometry_frame["frame_index"])] = (
+                geometry_frame["source"] if geometry_frame.get("homography") is not None else "unavailable"
+            )
             pitch_keypoints[int(geometry_frame["frame_index"])] = geometry_frame.get("predicted_keypoints", [])
             polygon = geometry_frame.get("pitch_polygon")
             if polygon is not None:
                 pitch_polygons[int(geometry_frame["frame_index"])] = polygon
+
+    radar_template = None
+    locations_by_frame: dict[int, list[dict[str, Any]]] = {}
+    if settings.draw_radar and pitch_geometry_json is not None:
+        if player_locations_parquet is None:
+            raise ValueError("Radar needs player-locations.parquet; export locations before rendering")
+        for row in pq.read_table(player_locations_parquet, columns=[
+            "frame_index", "pitch_x_m", "pitch_y_m", "kept", "projection_status",
+        ]).to_pylist():
+            locations_by_frame.setdefault(int(row["frame_index"]), []).append(row)
+        radar_template = _radar_canvas()
 
     artifact_groups = iter(
         groupby(iter_artifact(artifact_path), key=lambda packet: packet.frame_index)
@@ -336,6 +426,12 @@ def render_annotated_video(
                     settings=settings,
                     classifications=classifications,
                 )
+                if radar_template is not None:
+                    _draw_radar(
+                        image, locations_by_frame.get(source_packet.frame_index, []),
+                        geometry_source=geometry_sources.get(source_packet.frame_index, "unavailable"),
+                        template=radar_template,
+                    )
                 frame = av.VideoFrame.from_ndarray(image, format="bgr24")
                 frame.pts = frame_count
                 frame.time_base = Fraction(rate.denominator, rate.numerator)
@@ -354,3 +450,67 @@ def render_annotated_video(
         codec=settings.codec,
         wall_seconds=time.perf_counter() - start,
     )
+
+
+def render_report_videos(report_path: Path, output_root: Path) -> Path:
+    """CPU-only re-render of saved summaries/screenings; preserve the source reports/videos."""
+    from football_pose.configuration import PitchFilterConfig
+    from football_pose.pitch_filter import PitchGeometryManifest, PreparedPitchGeometry
+    from football_pose.pitch_locations import export_pitch_locations
+
+    report = json.loads(report_path.read_text())
+    conditions = (report["conditions"] if "conditions" in report else
+                  [{"method": report.get("configuration", {}).get("name"), "summary": report}])
+    rendered, skipped = [], []
+    for condition in conditions:
+        summary = condition.get("summary")
+        if not summary:
+            skipped.append({"condition": condition.get("method"), "reason": "no saved summary"})
+            continue
+        config = summary["configuration"]
+        settings = VideoOutputConfig.model_validate(config.get("video_output", {}))
+        geometry_path = summary.get("pitch_filter", {}).get("geometry")
+        geometry = None
+        if geometry_path is not None:
+            path = Path(geometry_path)
+            manifest = PitchGeometryManifest.model_validate_json(path.read_text())
+            geometry = PreparedPitchGeometry(manifest.geometry_id, path, manifest, True)
+        for job in summary.get("jobs", []):
+            context = {"condition": condition.get("method"), "model_id": job["model_id"], "job_id": job["job_id"]}
+            if job["status"] != "COMPLETE":
+                skipped.append({**context, "reason": "job not COMPLETE"})
+                continue
+            outputs = job["outputs"]
+            locations = None
+            if geometry is not None and settings.draw_radar:
+                locations = export_pitch_locations(
+                    prediction_parquet=outputs["parquet"], decisions_parquet=outputs["pitch_decisions"],
+                    geometry=geometry, config=PitchFilterConfig.model_validate(config["pitch_filter"]),
+                    output_root=output_root / "locations",
+                )
+            identifier = stable_hash({
+                "prediction_sha256": sha256_file(outputs["parquet"]),
+                "decision_sha256": sha256_file(outputs["pitch_decisions"]) if outputs.get("pitch_decisions") else None,
+                "geometry_sha256": sha256_file(geometry.path) if geometry else None,
+                "locations_sha256": sha256_file(locations.player_parquet) if locations else None,
+                "artifact_manifest_sha256": sha256_file(Path(summary["artifact"]) / "artifact.json"),
+                "source_sha256": sha256_file(config["input"]),
+                "settings": settings.model_dump(mode="json"), "model_id": job["model_id"],
+                "renderer_sha256": sha256_file(Path(__file__)),
+            })[:16]
+            video_path = output_root / identifier / "video.mp4"
+            if not video_path.is_file():
+                render_annotated_video(
+                    source_path=config["input"], artifact_path=summary["artifact"],
+                    prediction_parquet=outputs["parquet"], output_path=video_path,
+                    model_id=job["model_id"], settings=settings,
+                    decision_parquet=outputs.get("pitch_decisions"),
+                    pitch_geometry_json=geometry.path if geometry else None,
+                    player_locations_parquet=locations.player_parquet if locations else None,
+                )
+            rendered.append({**context, "video": str(video_path)})
+    if not rendered:
+        raise ValueError("No completed jobs to render")
+    index = output_root / f"videos-{stable_hash(str(report_path.resolve()))[:12]}.json"
+    atomic_write_json(index, {"source_report": str(report_path), "videos": rendered, "skipped": skipped})
+    return index

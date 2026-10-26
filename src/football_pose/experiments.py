@@ -24,6 +24,7 @@ from football_pose.pitch_filter import (
     postprocess_pitch_predictions,
 )
 from football_pose.preprocessing import build_pipeline
+from football_pose.pitch_locations import export_pitch_locations
 from football_pose.preprocessing.base import ProcessorContext
 from football_pose.provenance import collect_provenance
 from football_pose.runners import ExternalModelRunner
@@ -141,6 +142,7 @@ class ExperimentRunner:
         settings_id = stable_hash(
             {
                 "video_output": self.config.video_output.model_dump(mode="json"),
+                "renderer_sha256": sha256_file(Path(__file__).with_name("visualization.py")),
                 "pitch_filter": self.config.pitch_filter.model_dump(mode="json"),
                 "pitch_geometry_id": (
                     pitch_geometry.identifier if pitch_geometry is not None else None
@@ -178,6 +180,7 @@ class ExperimentRunner:
                 model_id=model.id,
                 settings=self.config.video_output,
                 decision_parquet=record.outputs.get("pitch_decisions"),
+                player_locations_parquet=record.outputs.get("player_locations"),
                 pitch_geometry_json=(
                     pitch_geometry.path if pitch_geometry is not None else None
                 ),
@@ -235,6 +238,15 @@ class ExperimentRunner:
         )
         timings = dict(record.timings)
         timings["pitch_postprocess_seconds"] = result.wall_seconds
+        locations = export_pitch_locations(
+            prediction_parquet=record.outputs["parquet"],
+            decisions_parquet=result.decisions_parquet,
+            geometry=pitch_geometry,
+            config=self.config.pitch_filter,
+            output_root=result.directory / "locations",
+        )
+        outputs.update(locations.outputs())
+        timings["pitch_locations_seconds"] = locations.wall_seconds
         updated = record.model_copy(
             update={"outputs": outputs, "timings": timings, "updated_at_unix": time.time()}
         )
