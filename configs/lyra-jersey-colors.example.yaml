@@ -1,0 +1,26 @@
+# Example palette only: replace these samples with colors from the actual clip.
+# Copy this file alongside it as lyra-jersey-colors.yaml before customizing.
+# The base config supplies the clip, three models and shared pitch settings.
+base_config: lyra-preprocessing-base.yaml
+output_root: /mnt/storage2/vincent/football-pose/results/football/jersey-colors
+cache_root: /mnt/storage2/vincent/football-pose/cache/preprocessing
+
+methods:
+  - name: baseline
+  - name: jersey-mild
+    processor:
+      type: jersey_color_enhance
+      params: &jersey_params
+        # RGB hex, quoted for YAML. Add sun/shadow samples for each kit as needed.
+        colors: ["#B53238", "#315EA8"]
+        color_tolerance: 25.0
+        strength: 0.25
+        chroma_gain: 1.15
+        clip_limit: 2.0
+        tile_grid: [8, 8]
+  - name: jersey-moderate
+    processor:
+      type: jersey_color_enhance
+      params:
+        <<: *jersey_params
+        strength: 0.50

@@ -38,11 +38,12 @@ def _suite(tmp_path: Path, tiny_video: Path) -> Path:
     return path
 
 
-def test_suite_covers_every_registered_method_and_fixes_shared_protocol() -> None:
+def test_suite_covers_generic_methods_and_fixes_shared_protocol() -> None:
     suite, expanded = expand_screening(SUITE, device=4)
     assert len(expanded) == 12
     assert {spec.type for config in expanded.values() for spec in config.processors} == (
-        set(REGISTRY) - {"identity"}
+        # Jersey enhancement requires a match-specific palette and has its own suite.
+        set(REGISTRY) - {"identity", "jersey_color_enhance"}
     ) | {"crop"}
     baseline = expanded["baseline"]
     assert [model.id for model in baseline.models] == ["yolo26-pose", "openpose-body25", "hrnet-w32"]

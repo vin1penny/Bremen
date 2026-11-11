@@ -38,7 +38,14 @@ PYTHONPATH=src pytest -q
 
 ### Defining experiments
 
-Copy [configs/server-three-models.yaml](./configs/server-three-models.yaml) and edit its input, model checkpoints, commands, processors, and GPU IDs. Processor order in YAML is execution order. Currently registered steps are `identity`, `resize`, `clahe`, `gamma`, `nlm_denoise`, `bilateral_denoise`, `unsharp_mask`, `motion_deblur`, `super_resolution`, `tile`, and `crop`. A processor implements one small interface, so another OpenCV operation can be added without changing video ingestion, caching, runners, or output validation.
+Copy [configs/server-three-models.yaml](./configs/server-three-models.yaml) and edit its input, model checkpoints, commands, processors, and GPU IDs. Processor order in YAML is execution order. Currently registered steps are `identity`, `resize`, `clahe`, `jersey_color_enhance`, `gamma`, `nlm_denoise`, `bilateral_denoise`, `unsharp_mask`, `motion_deblur`, `super_resolution`, `tile`, and `crop`. A processor implements one small interface, so another OpenCV operation can be added without changing video ingestion, caching, runners, or output validation.
+
+For known match kit colors, the optional
+[jersey-color processor](./docs/jersey-color-preprocessing.md) selectively enhances
+local contrast and chroma before inference. Its separate
+[example suite](./configs/lyra-jersey-colors.example.yaml) compares baseline, mild
+and moderate enhancement across all three models; replace its example palette
+with samples from the match footage.
 
 For the YOLO26/OpenPose/HRNet **single-step comparison**, use
 [configs/lyra-preprocessing-screen.yaml](./configs/lyra-preprocessing-screen.yaml).

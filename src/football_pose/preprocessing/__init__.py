@@ -5,6 +5,7 @@ from typing import Any, Callable
 from football_pose.configuration import ProcessorSpec
 from football_pose.preprocessing.base import Pipeline, Processor
 from football_pose.preprocessing.cropping import CropProcessor, UltralyticsDetectionProvider
+from football_pose.preprocessing.jersey import JerseyColorEnhancementProcessor
 from football_pose.preprocessing.opencv import (
     BilateralDenoiseProcessor,
     ClaheProcessor,
@@ -30,6 +31,7 @@ REGISTRY: dict[str, ProcessorFactory] = {
     "identity": _factory(IdentityProcessor),
     "resize": _factory(ResizeProcessor),
     "clahe": _factory(ClaheProcessor),
+    "jersey_color_enhance": _factory(JerseyColorEnhancementProcessor),
     "gamma": _factory(GammaProcessor),
     "nlm_denoise": _factory(NlmDenoiseProcessor),
     "bilateral_denoise": _factory(BilateralDenoiseProcessor),
