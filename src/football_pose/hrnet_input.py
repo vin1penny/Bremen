@@ -1,4 +1,4 @@
-"""The fixed YOLO-player-detector input adapter used by top-down HRNet."""
+"""Explicit football or COCO person-detector input adapters for top-down HRNet."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +20,7 @@ def add_hrnet_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--detector-image-size", type=int, default=1920)
     parser.add_argument("--detector-confidence", type=float, default=0.3)
     parser.add_argument("--detector-class-ids", default="1,2,3")
+    parser.add_argument("--detector-dataset", choices=["football", "coco"], default="football")
     parser.add_argument("--crop-padding", type=float, default=0.1)
     parser.add_argument("--crop-min-size", type=int, default=32)
 
@@ -28,9 +29,10 @@ def detector_parameters(namespace: argparse.Namespace, *, device: str) -> dict[s
     if namespace.detector_checkpoint is None:
         raise ValueError("HRNet requires --detector-checkpoint for full-frame or tiled inputs")
     classes = [int(item) for item in namespace.detector_class_ids.split(",")]
-    names = {1: "goalkeeper", 2: "player", 3: "referee"}
+    dataset = namespace.detector_dataset
+    names = {0: "person"} if dataset == "coco" else {1: "goalkeeper", 2: "player", 3: "referee"}
     if not classes or any(index not in names for index in classes):
-        raise ValueError("HRNet football detector class IDs must be a subset of 1,2,3")
+        raise ValueError(f"HRNet {dataset} detector class IDs must be a subset of {sorted(names)}")
     return {
         "checkpoint": str(namespace.detector_checkpoint),
         "confidence": namespace.detector_confidence,

@@ -106,6 +106,29 @@ def evaluate_coco(
         raise typer.Exit(1)
 
 
+@app.command("screen-coco")
+def screen_coco(
+    config: Path,
+    device: int = typer.Option(..., min=0, help="Physical GPU ID reserved in the semaphore."),
+    limit: int | None = typer.Option(None, min=1, help="Smoke subset; omit for all COCO images."),
+    check_only: bool = typer.Option(False, help="Validate datasets, checkpoints and containers without inference."),
+    resume: Path | None = typer.Option(None, help="Resume this suite directory, reusing verified completed jobs."),
+) -> None:
+    from football_pose.coco_screening import run_coco_screening
+
+    try:
+        path = run_coco_screening(config, device=device, limit=limit, check_only=check_only,
+                                 resume=resume, progress=typer.echo)
+    except (ValueError, OSError) as error:
+        typer.echo(str(error), err=True)
+        raise typer.Exit(1) from error
+    if path is not None:
+        typer.echo(f"Summary: {path}")
+        typer.echo(f"Comparison: {path.parent / 'comparison.csv'}")
+        if not json.loads(path.read_text())["success"]:
+            raise typer.Exit(1)
+
+
 @app.command("validate-config")
 def validate_config(
     config: Path,

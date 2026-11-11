@@ -128,3 +128,18 @@ def test_detector_is_released_when_hrnet_fails(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="HRNet failure"):
         hrnet_run.main()
     assert calls["closed"] == 1
+
+
+def test_coco_detector_uses_person_class_without_tracking(tmp_path):
+    import argparse
+    parser = argparse.ArgumentParser()
+    hrnet_input.add_hrnet_arguments(parser)
+    args = parser.parse_args(["--detector-dataset", "coco", "--detector-class-ids", "0",
+                              "--detector-checkpoint", str(tmp_path / "coco.pt")])
+    params = hrnet_input.detector_parameters(args, device="cpu")
+    assert params["class_ids"] == [0]
+    assert params["expected_class_names"] == {0: "person"}
+    assert params["track"] is False
+    args.detector_class_ids = "1,2,3"
+    with pytest.raises(ValueError, match="COCO|coco"):
+        hrnet_input.detector_parameters(args, device="cpu")

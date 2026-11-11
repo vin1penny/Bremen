@@ -1,0 +1,48 @@
+# Controlled preprocessing ablation, not a reproduction of published model scores.
+# Same 5,000 COCO val2017 images and fixed model settings for every condition.
+annotations: /mnt/storage2/vincent/football-pose/datasets/coco/annotations/person_keypoints_val2017.json
+images: /mnt/storage2/vincent/football-pose/datasets/coco/val2017
+output_dir: /mnt/storage2/vincent/football-pose/results/coco-preprocessing
+cache_root: /mnt/storage2/vincent/football-pose/cache/coco-preprocessing
+processors: []
+cross_region_iou: 0.5
+models:
+  - id: yolo26-pose
+    command: [bash, runners/container-runner.sh, 'vincent/football-pose-yolo26:dev', --imgsz, '640', --confidence, '0.001', --iou, '0.7', --nms-free]
+    checkpoint: /home/vincent/football-pose-private/checkpoints/yolo26x-pose.pt
+    batch_size: 8
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 86400
+  - id: openpose-body25
+    command: [bash, runners/container-runner.sh, 'vincent/football-pose-openpose:dev', '--net-resolution=-1x368']
+    checkpoint: /home/vincent/football-pose-private/checkpoints/pose_iter_584000.caffemodel
+    batch_size: 1
+    devices: [0]
+    timeout_seconds: 86400
+  - id: hrnet-w32
+    command:
+      - bash
+      - runners/container-runner.sh
+      - vincent/football-pose-hrnet:dev
+      - --pose-config
+      - td-hm_hrnet-w32_8xb64-210e_coco-256x192
+      - --detector-dataset
+      - coco
+      - --detector-class-ids
+      - '0'
+      - --detector-image-size
+      - '640'
+      - --detector-confidence
+      - '0.3'
+      - --crop-padding
+      - '0.1'
+      - --crop-min-size
+      - '32'
+    checkpoint: /mnt/storage2/vincent/football-pose/models/hrnet-w32-coco-256x192.pth
+    auxiliary_checkpoints:
+      detector: /mnt/storage2/vincent/football-pose/models/coco/yolo11x.pt
+    batch_size: 8
+    min_batch_size: 1
+    devices: [0]
+    timeout_seconds: 86400
