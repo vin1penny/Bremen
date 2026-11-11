@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,6 +12,16 @@ class ProcessorSpec(BaseModel):
 
     type: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExperimentMetadata(BaseModel):
+    """Match information saved with each run; only jersey_colors drives pixels."""
+
+    model_config = ConfigDict(extra="allow")
+
+    jersey_colors: dict[str, list[Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]]] = Field(
+        default_factory=dict
+    )
 
 
 class ModelSpec(BaseModel):
@@ -96,6 +106,7 @@ class ExperimentConfig(BaseModel):
     input: Path
     output_dir: Path = Path("experiment-output")
     processors: list[ProcessorSpec] = Field(default_factory=list)
+    metadata: ExperimentMetadata = Field(default_factory=ExperimentMetadata)
     models: list[ModelSpec] = Field(default_factory=list)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     video_output: VideoOutputConfig = Field(default_factory=VideoOutputConfig)
@@ -111,6 +122,24 @@ class ExperimentConfig(BaseModel):
         if len(model_ids) != len(set(model_ids)):
             raise ValueError("model ids must be unique")
         return self
+
+    def resolved_processors(self) -> list[ProcessorSpec]:
+        """Resolve per-match colors without mutating reusable processor specs."""
+        processors = [spec.model_copy(deep=True) for spec in self.processors]
+        for spec in processors:
+            if spec.type == "jersey_color_enhance" and "colors" not in spec.params:
+                colors = sorted({
+                    color.upper()
+                    for samples in self.metadata.jersey_colors.values()
+                    for color in samples
+                })
+                if not colors:
+                    raise ValueError(
+                        "jersey_color_enhance requires at least one color in "
+                        "metadata.jersey_colors or explicit processor params.colors"
+                    )
+                spec.params["colors"] = colors
+        return processors
 
 
 def _resolve_path(base: Path, value: Path | None) -> Path | None:
@@ -174,6 +203,7 @@ def load_config(path: str | Path, *, check_paths: bool = True) -> ExperimentConf
 
 def validate_config_paths(config: ExperimentConfig) -> None:
     """Validate an expanded config as well as one loaded from YAML."""
+    processors = config.resolved_processors()
     if not config.input.is_file():
         raise FileNotFoundError(f"input video does not exist: {config.input}")
     for model in config.models:
@@ -188,7 +218,7 @@ def validate_config_paths(config: ExperimentConfig) -> None:
                 )
     if config.pitch_filter.enabled:
         validate_pitch_checkpoint(config.pitch_filter)
-    for processor in config.processors:
+    for processor in processors:
         for checkpoint in _parameter_checkpoints(processor.params):
             if not checkpoint.is_file():
                 raise FileNotFoundError(

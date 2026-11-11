@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import cv2
 import numpy as np
 import pytest
+import yaml
 
 from football_pose.archive import read_archive
 from football_pose.artifacts import iter_artifact
-from football_pose.configuration import ExperimentConfig
+from football_pose.configuration import ExperimentConfig, load_config
 from football_pose.domain import FramePacket
 from football_pose.experiments import ExperimentRunner
 from football_pose.preprocessing import build_pipeline
 from football_pose.preprocessing.base import ProcessorContext
 from football_pose.preprocessing.jersey import JerseyColorEnhancementProcessor
-from football_pose.screening import expand_screening
+from football_pose.screening import expand_screening, run_screening
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -114,17 +116,23 @@ def test_filter_requires_bgr_uint8(swatches) -> None:
         _apply(swatches.derived(swatches.image.astype(np.float32)), colors=["#B53238"])
 
 
-def test_example_expands_to_three_conditions_with_identical_models() -> None:
+def test_example_has_no_assumed_palette_and_all_conditions_read_metadata() -> None:
     _, configs = expand_screening(REPOSITORY / "configs/lyra-jersey-colors.example.yaml", device=2)
     assert list(configs) == ["baseline", "jersey-mild", "jersey-moderate"]
     assert configs["baseline"].processors == []
     for config in configs.values():
         assert config.models == configs["baseline"].models
         assert config.pitch_filter == configs["baseline"].pitch_filter
-        pipeline = build_pipeline(config.processors)
+        assert not any(config.metadata.jersey_colors.values())
+        if config.processors:
+            with pytest.raises(ValueError, match="metadata.jersey_colors"):
+                config.resolved_processors()
+        config.metadata.jersey_colors["home"] = ["#B53238"]
+        config.metadata.jersey_colors["away"] = ["#315EA8"]
+        pipeline = build_pipeline(config.resolved_processors())
         pipeline.close()
-    mild = configs["jersey-mild"].processors[0].params
-    moderate = configs["jersey-moderate"].processors[0].params
+    mild = configs["jersey-mild"].resolved_processors()[0].params
+    moderate = configs["jersey-moderate"].resolved_processors()[0].params
     assert mild["colors"] == moderate["colors"]
     assert mild["strength"] == 0.25
     assert moderate["strength"] == 0.5
@@ -133,7 +141,8 @@ def test_example_expands_to_three_conditions_with_identical_models() -> None:
 def test_palette_is_cached_losslessly_and_reaches_model_runner(tmp_path, tiny_video) -> None:
     config = ExperimentConfig.model_validate({
         "name": "jersey-cache", "input": tiny_video, "output_dir": tmp_path / "output",
-        "processors": [{"type": "jersey_color_enhance", "params": {"colors": ["#00B400"]}}],
+        "metadata": {"match_id": "test-match", "jersey_colors": {"home": ["#00B400"]}},
+        "processors": [{"type": "jersey_color_enhance"}],
         "cache": {"root": tmp_path / "cache"},
         "models": [{"id": "mock", "command": ["{python}", str(REPOSITORY / "runners/mock/run.py")]}],
     })
@@ -153,6 +162,18 @@ def test_palette_is_cached_losslessly_and_reaches_model_runner(tmp_path, tiny_vi
     result = runner.run()
     assert result["success"] and result["cache_hit"]
     assert len(read_archive(result["jobs"][0]["outputs"]["parquet"])) == 6
+    assert result["configuration"]["metadata"] == config.metadata.model_dump()
+    assert first.artifact_manifest.provenance["processors"][0]["params"]["colors"] == ["#00B400"]
+
+    changed_palette = config.model_copy(deep=True)
+    changed_palette.metadata.jersey_colors["home"] = ["#0000FF"]
+    prepared = ExperimentRunner(changed_palette).prepare()
+    assert not prepared.cache_hit
+    assert prepared.pipeline_id != first.pipeline_id
+
+    notes_only = config.model_copy(deep=True)
+    notes_only.metadata.match_id = "updated-label"
+    assert ExperimentRunner(notes_only).prepare().cache_hit
 
     for key, value in [("colors", ["#FF0000"]), ("strength", 0.5)]:
         changed = config.model_copy(deep=True)
@@ -160,3 +181,69 @@ def test_palette_is_cached_losslessly_and_reaches_model_runner(tmp_path, tiny_vi
         prepared = ExperimentRunner(changed).prepare()
         assert not prepared.cache_hit
         assert prepared.pipeline_id != first.pipeline_id
+
+
+def test_metadata_palette_resolves_from_yaml_without_freezing_the_original(tmp_path, tiny_video) -> None:
+    path = tmp_path / "match.yaml"
+    path.write_text(yaml.safe_dump({
+        "name": "metadata", "input": str(tiny_video),
+        "metadata": {"match_id": "home-v-away", "jersey_colors": {
+            "home": ["#b53238", "#B53238"], "away": ["#315EA8"], "referee": [],
+        }},
+        "processors": [{"type": "jersey_color_enhance", "params": {"strength": 0.25}}],
+    }))
+    config = load_config(path)
+    assert config.resolved_processors()[0].params["colors"] == ["#315EA8", "#B53238"]
+    assert "colors" not in config.processors[0].params
+    config.metadata.jersey_colors = {"home": ["#FFFFFF"]}
+    assert config.resolved_processors()[0].params["colors"] == ["#FFFFFF"]
+    config.processors[0].params["colors"] = ["#000000"]
+    assert config.resolved_processors()[0].params["colors"] == ["#000000"]
+
+
+@pytest.mark.parametrize("palette", [{"home": ["red"]}, {"away": "#FFFFFF"}, ["#FFFFFF"]])
+def test_malformed_metadata_palette_is_rejected(palette) -> None:
+    with pytest.raises(ValueError, match="jersey_colors"):
+        ExperimentConfig.model_validate({
+            "name": "bad-palette", "input": "unused.mp4",
+            "metadata": {"jersey_colors": palette},
+        })
+
+
+def test_metadata_inheritance_preflight_and_saved_screening_results(tmp_path, tiny_video, monkeypatch) -> None:
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    base = tmp_path / "base.yaml"
+    base.write_text(yaml.safe_dump({
+        "name": "metadata-screen", "input": str(tiny_video),
+        "metadata": {"match_id": "test-match", "jersey_colors": {"home": ["#00B400"]}},
+        "models": [{"id": "mock", "command": ["{python}", str(REPOSITORY / "runners/mock/run.py")]}],
+    }))
+    suite = {
+        "base_config": str(base), "output_root": str(tmp_path / "results"),
+        "cache_root": str(tmp_path / "cache"),
+        "methods": [{"name": "baseline"}, {"name": "jersey", "processor": {"type": "jersey_color_enhance"}}],
+    }
+    path = tmp_path / "suite.yaml"
+    path.write_text(yaml.safe_dump(suite))
+    _, configs = expand_screening(path, device=0)
+    assert configs["jersey"].resolved_processors()[0].params["colors"] == ["#00B400"]
+
+    # The suite can replace a base palette, while keeping other match information.
+    suite["metadata"] = {"jersey_colors": {"away": ["#FFFFFF"]}, "checkpoint": "halftime"}
+    path.write_text(yaml.safe_dump(suite))
+    _, configs = expand_screening(path, device=0)
+    assert configs["jersey"].metadata.match_id == "test-match"
+    assert configs["jersey"].resolved_processors()[0].params["colors"] == ["#FFFFFF"]
+    result = run_screening(path, device=0)
+    report = json.loads(result.read_text())
+    assert report["success"]
+    for condition in report["conditions"]:
+        saved = load_config(result.parent / "configs" / f"{condition['method']}.yaml")
+        assert saved.metadata == configs[condition["method"]].metadata
+        assert condition["summary"]["configuration"]["metadata"] == saved.metadata.model_dump()
+
+    suite["metadata"] = {"jersey_colors": {"home": [], "away": []}}
+    path.write_text(yaml.safe_dump(suite))
+    with pytest.raises(ValueError, match="metadata.jersey_colors"):
+        run_screening(path, device=0, check_only=True)
+    assert len(list((tmp_path / "results").iterdir())) == 1

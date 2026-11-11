@@ -30,6 +30,8 @@ def expand_coco_screening(path: Path, *, device: int):
         raise ValueError(f"GPU {device} is outside CUDA_VISIBLE_DEVICES={','.join(visible)}")
     host_device = str(visible.index(str(device))) if visible else str(device)
     suite = load_screening(path)
+    if suite.metadata is not None:
+        raise ValueError("Match metadata is supported by screen-preprocessing, not screen-coco")
     base = load_coco_config(suite.base_config)
     if base.processors or not base.models:
         raise ValueError("COCO screening base must contain models and no processors")

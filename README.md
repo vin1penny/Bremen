@@ -44,8 +44,8 @@ For known match kit colors, the optional
 [jersey-color processor](./docs/jersey-color-preprocessing.md) selectively enhances
 local contrast and chroma before inference. Its separate
 [example suite](./configs/lyra-jersey-colors.example.yaml) compares baseline, mild
-and moderate enhancement across all three models; replace its example palette
-with samples from the match footage.
+and moderate enhancement across all three models. Its palette is left empty;
+add samples from the match footage under `metadata.jersey_colors` when ready.
 
 For the YOLO26/OpenPose/HRNet **single-step comparison**, use
 [configs/lyra-preprocessing-screen.yaml](./configs/lyra-preprocessing-screen.yaml).

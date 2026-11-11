@@ -17,7 +17,7 @@ import yaml
 
 from football_pose.artifacts import load_artifact_manifest, sha256_file
 from football_pose.configuration import (
-    ExperimentConfig, ProcessorSpec, _resolve_checkpoint_parameters,
+    ExperimentConfig, ExperimentMetadata, ProcessorSpec, _resolve_checkpoint_parameters,
     load_config, validate_config_paths,
 )
 from football_pose.experiments import ExperimentRunner
@@ -36,6 +36,7 @@ class ScreeningConfig(BaseModel):
     base_config: Path
     output_root: Path
     cache_root: Path
+    metadata: ExperimentMetadata | None = None
     methods: list[ScreeningMethod] = Field(min_length=2)
 
     @model_validator(mode="after")
@@ -87,6 +88,11 @@ def expand_screening(
         if methods and method.name not in methods | {"baseline"}:
             continue
         config = base.model_copy(deep=True)
+        if suite.metadata is not None:
+            config.metadata = ExperimentMetadata.model_validate({
+                **base.metadata.model_dump(),
+                **suite.metadata.model_dump(exclude_unset=True),
+            })
         config.name = f"{base.name}-{method.name}"
         config.output_dir = suite.output_root / method.name
         config.cache.root = suite.cache_root
@@ -114,7 +120,7 @@ def preflight(configs: dict[str, ExperimentConfig], *, device: int) -> None:
     for name, config in configs.items():
         try:
             validate_config_paths(config)
-            pipeline = build_pipeline(config.processors)
+            pipeline = build_pipeline(config.resolved_processors())
             try:
                 for processor in pipeline.processors:
                     validate = getattr(processor, "validate", None)
@@ -280,7 +286,7 @@ def run_screening(
             elif isinstance(value, list):
                 for item in value:
                     collect(item)
-        collect(payload)
+        collect({key: payload[key] for key in ("processors", "models", "pitch_filter")})
     report["checkpoint_sha256"] = {item: sha256_file(item) for item in sorted(checkpoints)}
     progress(f"Screening output: {root}")
     write_comparison(root, report)

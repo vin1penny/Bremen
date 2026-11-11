@@ -53,7 +53,8 @@ class ExperimentRunner:
     def prepare(self) -> PreparedExperiment:
         source_hash = sha256_file(self.config.input)
         source_video_id = source_hash[:16]
-        pipeline_payload = [spec.model_dump(mode="json") for spec in self.config.processors]
+        processors = self.config.resolved_processors()
+        pipeline_payload = [spec.model_dump(mode="json") for spec in processors]
         pipeline_fingerprint = {
             "configuration": self._fingerprint_checkpoints(pipeline_payload),
             "implementation": self._implementation_fingerprint(preprocessing_only=True),
@@ -62,7 +63,7 @@ class ExperimentRunner:
         experiment_identifier = stable_hash(
             {"name": self.config.name, "source": source_hash, "pipeline": pipeline_sha}
         )[:16]
-        pipeline = build_pipeline(self.config.processors)
+        pipeline = build_pipeline(processors)
         source = VideoSource(self.config.input)
         info = source.probe()
         context = ProcessorContext(experiment_id=experiment_identifier, pipeline_id=pipeline_sha)

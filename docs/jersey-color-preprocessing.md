@@ -21,21 +21,48 @@ pose accuracy must be measured on annotated football footage.
 
 ## Configure a match
 
-Add the following processor to an experiment's `processors` list. The two RGB
-hex values below are **examples**, not colors measured from the included clip.
-Quote the values because `#` otherwise starts a YAML comment.
+Store the palette with the clip's other information under
+`metadata.jersey_colors` in an experiment config or football screening suite.
+Leave the lists empty until the match is chosen, then add quoted RGB `#RRGGBB`
+samples to the relevant roles. Multiple samples per role are supported. Role
+names are descriptive labels; the filter combines all populated lists.
 
 ```yaml
+metadata:
+  match_id: null
+  jersey_colors:
+    home: []
+    away: []
+    home_goalkeeper: []
+    away_goalkeeper: []
+    referee: []
+
 processors:
   - type: jersey_color_enhance
     params:
-      colors: ["#B53238", "#315EA8"]
       color_tolerance: 25.0
       strength: 0.35
       chroma_gain: 1.15
       clip_limit: 2.0
       tile_grid: [8, 8]
 ```
+
+For example, a sampled red kit could be recorded as
+`home: ["#B53238", "#92282D"]`; these are illustrative values only. Quote the
+samples because `#` otherwise starts a YAML comment. Additional match information
+such as team names, camera or notes can live alongside `jersey_colors` under
+`metadata`.
+
+When `params.colors` is omitted, the processor reads the palette from metadata.
+An explicit `params.colors` list overrides the metadata palette for that
+condition. Empty roles are fine, but enabling enhancement with no colors fails
+validation/preflight with a clear message. Baseline runs do not require colors.
+
+In a football screening suite, metadata is inherited from `base_config`. Any
+metadata keys specified in the suite override the corresponding base keys;
+specifying `jersey_colors` replaces the entire base palette. Both the baseline
+and enhancement conditions retain the same match metadata. This metadata input
+is supported by `screen-preprocessing`, not the multi-image COCO screen.
 
 Sample the visible jerseys from several representative frames using a color
 picker. Include both teams and any goalkeepers/referees you want to enhance.
@@ -47,7 +74,7 @@ change their appearance.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `colors` | Required | Non-empty list of RGB `#RRGGBB` samples from the clip. |
+| `colors` | From metadata | Optional non-empty list of RGB `#RRGGBB` samples overriding `metadata.jersey_colors`. |
 | `color_tolerance` | `25.0` | Maximum Euclidean distance in CIE Lab; `(0, 100]`. Selection fades smoothly to zero at this distance. A wider tolerance selects more background too. |
 | `strength` | `0.35` | Maximum blend weight, from `0` (exact identity) to `1`. Pixels with weaker color similarity receive a smaller weight. |
 | `chroma_gain` | `1.15` | Multiplier on Lab a/b channels, from `1` (no chroma boost) to `2`. Local contrast still applies at `1`. |
@@ -67,8 +94,12 @@ color range remain byte-for-byte unchanged. Gamut clipping and output rounding
 can affect selected pixels. The original input array is never modified.
 
 For a first comparison, use this as the only preprocessing step. Other steps
-before it can change the colors used for matching. Palette and parameter changes
-are recorded in provenance and produce distinct preprocessing cache keys.
+before it can change the colors used for matching. Match metadata is saved in
+expanded screening configs and experiment summaries. The resolved color samples
+are saved in artifact provenance and participate in preprocessing cache keys.
+Changing the effective palette or enhancement parameters invalidates that cache;
+changing only descriptive match information does not. Duplicate samples, hex
+letter case and role ordering do not affect a metadata-derived palette's key.
 
 ## Compare the three models on Lyra
 
@@ -80,8 +111,11 @@ while its jobs are active.
 cp configs/lyra-jersey-colors.example.yaml configs/lyra-jersey-colors.yaml
 ```
 
-Edit `colors` in the copied file. Its YAML anchor shares that palette between the
-two enhancement conditions. The base config supplies the football clip, model
+Fill in `metadata.jersey_colors` in the copied file when a match is selected.
+The example deliberately contains no assumed colors, so its enhancement
+conditions cannot run until populated. Both conditions automatically use the
+same metadata palette; the YAML anchor shares their enhancement settings.
+The base config supplies the football clip, model
 checkpoints and pitch settings; to use a different match, copy that base config,
 change its `input`, and point `base_config` at the copy. Paths are relative to the
 configuration file unless absolute.
