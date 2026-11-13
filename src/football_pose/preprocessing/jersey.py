@@ -74,14 +74,24 @@ class JerseyColorEnhancementProcessor:
 
     def process(self, packet: FramePacket, context: ProcessorContext) -> list[FramePacket]:
         del context
-        _validate_bgr_u8(packet)
         if self.strength == 0:
+            _validate_bgr_u8(packet)
             return [packet]
+        output, _ = self.inspect(packet)
+        return [output]
+
+    def inspect(self, packet: FramePacket) -> tuple[FramePacket, np.ndarray]:
+        """Return the actual enhanced packet and its incoming-image selection mask.
+
+        The mask is colour similarity, before multiplication by blend strength.
+        Inspection shares the inference calculation, including identity cases.
+        """
+        _validate_bgr_u8(packet)
         original = packet.image.astype(np.float32) / 255.0
         lab = cv2.cvtColor(original, cv2.COLOR_BGR2LAB)
         mask = self._color_mask(lab)
-        if not np.any(mask):
-            return [packet]
+        if self.strength == 0 or not np.any(mask):
+            return packet, mask
 
         luminance = np.rint(lab[:, :, 0] * 255.0 / 100.0).astype(np.uint8)
         lab[:, :, 0] = self.clahe.apply(luminance).astype(np.float32) * (100.0 / 255.0)
@@ -92,4 +102,4 @@ class JerseyColorEnhancementProcessor:
         output = np.rint(np.clip(blended, 0.0, 1.0) * 255.0).astype(np.uint8)
         # Avoid even conversion/rounding changes to pixels outside the palette.
         output[mask == 0] = packet.image[mask == 0]
-        return [packet.derived(output)]
+        return packet.derived(output), mask

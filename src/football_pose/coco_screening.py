@@ -30,6 +30,8 @@ def expand_coco_screening(path: Path, *, device: int):
         raise ValueError(f"GPU {device} is outside CUDA_VISIBLE_DEVICES={','.join(visible)}")
     host_device = str(visible.index(str(device))) if visible else str(device)
     suite = load_screening(path)
+    if any(len(method.processor_specs()) > 1 for method in suite.methods):
+        raise ValueError("Composite conditions are supported by screen-preprocessing; screen-coco requires single steps")
     if suite.metadata is not None:
         raise ValueError("Match metadata is supported by screen-preprocessing, not screen-coco")
     base = load_coco_config(suite.base_config)
@@ -42,7 +44,7 @@ def expand_coco_screening(path: Path, *, device: int):
         values = base.model_dump(mode="json")
         values["output_dir"] = str(suite.output_root / method.name)
         values["cache_root"] = str(suite.cache_root)
-        values["processors"] = [method.processor.model_dump(mode="json")] if method.processor else []
+        values["processors"] = [spec.model_dump(mode="json") for spec in method.processor_specs()]
         for model in values["models"]:
             model["devices"] = [device]
         for processor in values["processors"]:

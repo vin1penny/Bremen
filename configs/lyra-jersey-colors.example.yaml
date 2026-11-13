@@ -5,6 +5,11 @@ base_config: lyra-preprocessing-base.yaml
 output_root: /mnt/storage2/vincent/football-pose/results/football/jersey-colors
 cache_root: /mnt/storage2/vincent/football-pose/cache/preprocessing
 
+# Independent inspection export; does not add a preprocessing/model condition.
+jersey_diagnostics:
+  enabled: true
+  frame_indices: [0, 1, 2, 3]
+
 metadata:
   match_id: null
   jersey_colors:

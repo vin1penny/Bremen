@@ -26,7 +26,7 @@ pitch_filter:
   ankle_confidence: 0.2
   deduplication_iou: 0.5
 
-# Screening replaces this empty list with exactly one method at a time.
+# Screening replaces this list with the selected condition's ordered processors.
 processors: []
 
 cache:

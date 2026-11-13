@@ -1,0 +1,50 @@
+# Nine jobs on sample_30.mov: baseline and two added methods, each with three models.
+base_config: lyra-preprocessing-base.yaml
+output_root: /mnt/storage2/vincent/football-pose/results/football/additional-methods
+cache_root: /mnt/storage2/vincent/football-pose/cache/preprocessing
+
+jersey_diagnostics:
+  enabled: true
+  frame_indices: [0, 260, 520, 781]
+
+metadata:
+  jersey_colors:
+    green: ["#446D64", "#769B7E"]
+    white: ["#ECF7EC", "#A9BCBC"]
+  palette_source: Median RGB in 3x3 patches on the green/white kit in frame 0 of sample_30.mov
+  palette_sample_xy:
+    "#446D64": [575, 721]
+    "#769B7E": [419, 565]
+    "#ECF7EC": [418, 588]
+    "#A9BCBC": [422, 590]
+  lighting:
+    weather: null
+    recording_start: null
+    venue: null
+    latitude_deg: null
+    longitude_deg: null
+    pitch_axis_bearing_deg: null
+    pitch_axis_toward_goal: null
+    camera_side: null
+    camera_heading_deg: null
+    shadow_notes: null
+
+methods:
+  - name: baseline
+  - name: jersey-colors
+    processor:
+      type: jersey_color_enhance
+      params:
+        strength: 0.35
+        color_tolerance: 25.0
+        chroma_gain: 1.15
+        clip_limit: 2.0
+        tile_grid: [8, 8]
+  - name: shaded-players
+    processors:
+      - type: gamma
+        params: {gamma: 1.2}
+      - type: clahe
+        params: {clip_limit: 2.0, tile_grid: [8, 8]}
+      - type: unsharp_mask
+        params: {kernel_size: 5, sigma: 1.0, amount: 0.75}

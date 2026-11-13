@@ -211,6 +211,7 @@ def run_experiment(
             "frame_count": prepared.artifact_manifest.frame_count,
             "format": prepared.artifact_manifest.format,
             "preprocessing_stage_timings": prepared.stage_timings,
+            "jersey_diagnostics": runner.prepare_diagnostics(prepared),
             "success": True,
         }
     else:

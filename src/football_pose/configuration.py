@@ -67,6 +67,22 @@ class VideoOutputConfig(BaseModel):
     draw_radar: bool = True
 
 
+class JerseyDiagnosticsConfig(BaseModel):
+    """Small, separate inspection export; never changes model input or cache keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    frame_indices: list[Annotated[int, Field(strict=True, ge=0)]] = Field(
+        default_factory=lambda: [0, 1, 2, 3], min_length=1, max_length=16,
+    )
+
+    @model_validator(mode="after")
+    def unique_frames(self) -> "JerseyDiagnosticsConfig":
+        self.frame_indices = sorted(set(self.frame_indices))
+        return self
+
+
 class PitchFilterConfig(BaseModel):
     """Shared pitch-localization and pose-filtering settings."""
 
@@ -110,6 +126,7 @@ class ExperimentConfig(BaseModel):
     models: list[ModelSpec] = Field(default_factory=list)
     cache: CacheConfig = Field(default_factory=CacheConfig)
     video_output: VideoOutputConfig = Field(default_factory=VideoOutputConfig)
+    jersey_diagnostics: JerseyDiagnosticsConfig = Field(default_factory=JerseyDiagnosticsConfig)
     pitch_filter: PitchFilterConfig = Field(default_factory=PitchFilterConfig)
     fail_fast: bool = False
 
@@ -126,6 +143,15 @@ class ExperimentConfig(BaseModel):
     def resolved_processors(self) -> list[ProcessorSpec]:
         """Resolve per-match colors without mutating reusable processor specs."""
         processors = [spec.model_copy(deep=True) for spec in self.processors]
+        if (
+            self.jersey_diagnostics.enabled
+            and any(spec.type == "jersey_color_enhance" for spec in processors)
+            and len(processors) != 1
+        ):
+            raise ValueError(
+                "jersey_diagnostics currently requires a standalone jersey_color_enhance "
+                "processor; disable diagnostics for combined preprocessing chains"
+            )
         for spec in processors:
             if spec.type == "jersey_color_enhance" and "colors" not in spec.params:
                 colors = sorted({

@@ -7,6 +7,14 @@ with the same dimensions and coordinate mapping. All three existing model
 runners can consume the resulting lossless preprocessing artifact, including
 HRNet's person detector.
 
+Count this as **one composite preprocessing method**: color selection, internal
+CLAHE, chroma enhancement and blending. It runs on its own; do not add a separate
+CLAHE stage to reproduce it. A preceding CLAHE stage would change the colors used
+for matching and apply contrast processing twice. The two configured strengths
+are variants of this same method. Comparison with global CLAHE alone does not
+isolate the contribution of color selection, because the jersey method also
+includes chroma enhancement and blending.
+
 ```text
 Original frame + match palette
     → soft color-similarity mask
@@ -17,7 +25,8 @@ Original frame + match palette
 The method selects colors, not people. Advertising, spectators, pitch lines and
 other objects with matching colors can also be enhanced. Green kits can overlap
 with grass; white kits can overlap with pitch lines. Effects on detection and
-pose accuracy must be measured on annotated football footage.
+pose usefulness requires independent evaluation. Planned tracking comparisons
+can check player presence; they do not establish joint-localisation accuracy.
 
 ## Configure a match
 
@@ -101,6 +110,62 @@ Changing the effective palette or enhancement parameters invalidates that cache;
 changing only descriptive match information does not. Duplicate samples, hex
 letter case and role ordering do not affect a metadata-derived palette's key.
 
+## Inspect input, selection mask and enhanced output
+
+The example jersey suite enables a small diagnostic export. The same setting can
+be added to an individual experiment or football screening suite:
+
+```yaml
+jersey_diagnostics:
+  enabled: true
+  frame_indices: [0, 1, 2, 3]
+```
+
+Indices are zero-based decoded source frames, with at most 16 requested frames.
+Choose frames across lighting and camera conditions when reviewing a longer
+clip. The default is four initial frames. Only selected frames are enhanced for
+this export; video decoding proceeds through the highest requested index.
+Requested frames beyond the end are listed as missing, not silently replaced.
+
+Each available sample produces native-resolution `input`, `mask` and `enhanced`
+PNGs plus a labelled side-by-side `comparison` PNG (at most 960 pixels per panel).
+Black mask pixels mean no color selection; white means maximum selection. This
+is the selection weight `m`, **not** the final blend weight `strength * m`, a
+player probability or a segmentation label. The mask PNG is rounded to 8-bit
+values; the manifest's selection fractions and mean weights use the float mask.
+Even at strength zero, the mask can show matching colors while the output stays
+identical to the input.
+
+The export uses the same numerical filter implementation as inference, on the
+original incoming frame. It never passes the mask or comparison image into a
+model. Inspect green/grass and white/pitch-line overlap, missed shaded jerseys
+and unintended background enhancement. These images are diagnostic evidence,
+not evidence of improved detection or correct keypoints.
+
+Exports live under
+`output_dir/experiments/<experiment_id>/jersey-diagnostics/<export_id>/`.
+The experiment summary and screening comparison link to `manifest.json`, which
+records the palette/settings, frame IDs, timestamps, dimensions and file names.
+`run --prepare-only` also creates the export and prints its manifest path without
+running models. Diagnostics work with both newly prepared and cached inference
+artifacts; missing preview files are regenerated. Changing preview selection or
+enabling diagnostics does not change the inference cache or model job identity.
+Code changes can still invalidate older caches through the normal source
+fingerprint.
+
+The independent decode/filter/write pass is timed under `jersey_diagnostics` in
+the summary and `jersey_diagnostics_seconds` in the comparison. It is excluded
+from preprocessing/model durations, but included in the complete condition's
+wall time. The condition-level diagnostic duration is repeated for each model
+row and should not be summed three times.
+
+The initial exporter supports the standalone jersey processor used by this
+suite. Enabling it for a combined preprocessing chain raises a clear error:
+earlier processors could change the pixels, geometry or tracking state, making
+source-frame previews misleading. Combined processing remains available with
+diagnostics disabled. Conditions without a jersey processor, including the
+baseline, are marked not applicable.
+
 ## Compare the three models on Lyra
 
 Use this separate football suite after the current COCO run has finished and the
@@ -135,9 +200,10 @@ export CUDA_VISIBLE_DEVICES=0
 Run the experiment inside tmux as with the existing suite. Results go under
 `/mnt/storage2/vincent/football-pose/results/football/jersey-colors`; the screening
 report records detection counts, runtimes, expanded configs and output videos.
-Those counts measure yield, not accuracy. Compare recall, precision and pose
-metrics against annotations before deciding whether the filter helps, and choose
-the palette/tuning on separate calibration frames rather than the evaluation set.
+Those counts measure yield, not accuracy. Assess player presence with the planned
+tracking reference and reserve joint-accuracy claims for suitable independent
+pose references. Choose palette/tuning on separate calibration frames rather
+than the evaluation set.
 
 This match-specific processor is opt-in. The generic football and COCO suites
 retain their original twelve conditions. No new packages or model retraining

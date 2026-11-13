@@ -1,0 +1,43 @@
+# Global enhancement motivated by shaded players, not automatic shadow detection.
+# The base supplies the clip, all three models and the shared pitch protocol.
+base_config: lyra-preprocessing-base.yaml
+output_root: /mnt/storage2/vincent/football-pose/results/football/shaded-players
+cache_root: /mnt/storage2/vincent/football-pose/cache/preprocessing
+
+# Optional descriptive context only: these fields do not select pixels or tune steps.
+# Leave unknown values null. Quote timestamps with an explicit UTC offset.
+metadata:
+  match_id: null
+  lighting:
+    weather: null                 # e.g. sunny, overcast, changing cloud cover
+    recording_start: null         # actual first-frame date/time, not match clock
+    venue: null
+    latitude_deg: null            # positive north
+    longitude_deg: null           # positive east
+    pitch_axis_bearing_deg: null  # clockwise from true north; name the goal below
+    pitch_axis_toward_goal: null
+    camera_side: null
+    camera_heading_deg: null      # clockwise from true north, at clip start
+    shadow_notes: null            # observed shade location and changes during clip
+
+# Components use the same settings as the existing single-step screening suite.
+# Five conditions x three models = 15 jobs. YAML order is processing order.
+methods:
+  - name: baseline
+  - name: gamma-brighten
+    processor: &gamma
+      type: gamma
+      params: {gamma: 1.2}
+  - name: clahe
+    processor: &clahe
+      type: clahe
+      params: {clip_limit: 2.0, tile_grid: [8, 8]}
+  - name: unsharp
+    processor: &unsharp
+      type: unsharp_mask
+      params: {kernel_size: 5, sigma: 1.0, amount: 0.75}
+  - name: shaded-players
+    processors:
+      - *gamma
+      - *clahe
+      - *unsharp

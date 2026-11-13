@@ -18,6 +18,7 @@ from football_pose.artifacts import (
 )
 from football_pose.configuration import ExperimentConfig, ModelSpec
 from football_pose.jobs import JobRecord, JobStatus, JobStore, atomic_write_json
+from football_pose.jersey_diagnostics import render_jersey_diagnostics
 from football_pose.pitch_filter import (
     PitchGeometryStore,
     PreparedPitchGeometry,
@@ -127,6 +128,12 @@ class ExperimentRunner:
                 "model": model_payload,
             }
         )[:24]
+
+    def prepare_diagnostics(self, prepared: PreparedExperiment) -> dict[str, Any]:
+        return render_jersey_diagnostics(
+            self.config, experiment_id=prepared.experiment_id,
+            artifact_id=prepared.artifact_manifest.artifact_id,
+        )
 
     @staticmethod
     def _safe_path_component(value: str) -> str:
@@ -282,7 +289,7 @@ class ExperimentRunner:
             paths = [
                 path
                 for path in sorted(package.glob("*.py"))
-                if path.name != "visualization.py"
+                if path.name not in {"visualization.py", "jersey_diagnostics.py"}
             ]
         return stable_hash(
             {
@@ -435,6 +442,7 @@ class ExperimentRunner:
         cold_start = time.perf_counter()
         prepared = self.prepare()
         preprocessing_wall = time.perf_counter() - cold_start
+        jersey_diagnostics = self.prepare_diagnostics(prepared)
         pitch_geometry: PreparedPitchGeometry | None = None
         pitch_geometry_wall = 0.0
         if self.config.pitch_filter.enabled:
@@ -460,6 +468,7 @@ class ExperimentRunner:
             "preprocessing_wall_seconds": preprocessing_wall,
             "artifact_processing_seconds": prepared.artifact_manifest.processing_seconds,
             "preprocessing_stage_timings": prepared.stage_timings,
+            "jersey_diagnostics": jersey_diagnostics,
             "pitch_filter": (
                 {
                     "enabled": True,

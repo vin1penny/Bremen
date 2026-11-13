@@ -46,6 +46,27 @@ local contrast and chroma before inference. Its separate
 [example suite](./configs/lyra-jersey-colors.example.yaml) compares baseline, mild
 and moderate enhancement across all three models. Its palette is left empty;
 add samples from the match footage under `metadata.jersey_colors` when ready.
+This is one composite method with internal CLAHE; it needs no separate CLAHE
+stage. The example also enables four matched input/mask/enhanced diagnostic
+samples, exported independently of model inputs and linked from run summaries.
+
+The [shaded-player suite](./configs/lyra-shaded-players.example.yaml) tests gamma
+brightening → CLAHE → unsharp masking against the baseline and each component
+alone (five conditions, 15 model jobs). This is full-frame enhancement motivated
+by shaded players; it does not automatically locate shade. Optional weather and
+camera metadata are saved as context. See the
+[method and execution notes](./docs/shaded-player-preprocessing.md) for settings,
+commands and evaluation limits. Football screening accepts ordered `processors`
+lists for combinations as well as the existing single `processor` format.
+
+For a direct baseline/jersey/shade comparison on `sample_30.mov`, use
+[configs/lyra-additional-methods.yaml](./configs/lyra-additional-methods.yaml).
+It runs nine jobs with the previously sampled green/white palette at strength
+0.35 and the three-stage shaded-player condition. After reserving a GPU, run
+`bash runners/start-football-additions.sh N` inside tmux, replacing `N` with its
+physical index. The launcher checks usage and assets, shares the COCO launcher's
+per-GPU lock and saves a log. See the
+[comparison instructions](./docs/shaded-player-preprocessing.md#direct-comparison-with-jersey-enhancement).
 
 For the YOLO26/OpenPose/HRNet **single-step comparison**, use
 [configs/lyra-preprocessing-screen.yaml](./configs/lyra-preprocessing-screen.yaml).

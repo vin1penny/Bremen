@@ -1,4 +1,4 @@
-"""Single-factor preprocessing runs with one shared model/pitch protocol."""
+"""Preprocessing conditions with one shared model/pitch protocol."""
 from __future__ import annotations
 
 import csv
@@ -17,7 +17,7 @@ import yaml
 
 from football_pose.artifacts import load_artifact_manifest, sha256_file
 from football_pose.configuration import (
-    ExperimentConfig, ExperimentMetadata, ProcessorSpec, _resolve_checkpoint_parameters,
+    ExperimentConfig, ExperimentMetadata, JerseyDiagnosticsConfig, ProcessorSpec, _resolve_checkpoint_parameters,
     load_config, validate_config_paths,
 )
 from football_pose.experiments import ExperimentRunner
@@ -29,6 +29,19 @@ class ScreeningMethod(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(pattern=r"^[a-z0-9][a-z0-9-]*$")
     processor: ProcessorSpec | None = None
+    processors: list[ProcessorSpec] | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def one_processor_form(self) -> "ScreeningMethod":
+        if self.processor is not None and self.processors is not None:
+            raise ValueError("use either processor or processors, not both")
+        return self
+
+    def processor_specs(self) -> list[ProcessorSpec]:
+        """Return steps in execution order, accepting the legacy single-step form."""
+        if self.processors is not None:
+            return self.processors
+        return [self.processor] if self.processor is not None else []
 
 
 class ScreeningConfig(BaseModel):
@@ -37,18 +50,17 @@ class ScreeningConfig(BaseModel):
     output_root: Path
     cache_root: Path
     metadata: ExperimentMetadata | None = None
+    jersey_diagnostics: JerseyDiagnosticsConfig | None = None
     methods: list[ScreeningMethod] = Field(min_length=2)
 
     @model_validator(mode="after")
-    def single_factor(self) -> "ScreeningConfig":
+    def valid_conditions(self) -> "ScreeningConfig":
         names = [method.name for method in self.methods]
         if len(names) != len(set(names)):
             raise ValueError("screening method names must be unique")
-        baselines = [method.name for method in self.methods if method.processor is None]
+        baselines = [method.name for method in self.methods if not method.processor_specs()]
         if baselines != ["baseline"]:
             raise ValueError("exactly one baseline with no processor is required")
-        if next(method for method in self.methods if method.name == "baseline").processor:
-            raise ValueError("baseline must not contain a processor")
         return self
 
 
@@ -60,9 +72,9 @@ def load_screening(path: Path) -> ScreeningConfig:
         if not value.is_absolute():
             setattr(config, field, (path.parent / value).resolve())
     for method in config.methods:
-        if method.processor is not None:
-            method.processor.params = _resolve_checkpoint_parameters(
-                method.processor.params, path.parent,
+        for processor in method.processor_specs():
+            processor.params = _resolve_checkpoint_parameters(
+                processor.params, path.parent,
             )
     return config
 
@@ -97,7 +109,9 @@ def expand_screening(
         config.output_dir = suite.output_root / method.name
         config.cache.root = suite.cache_root
         config.cache.format = "auto"
-        config.processors = [method.processor.model_copy(deep=True)] if method.processor else []
+        config.processors = [spec.model_copy(deep=True) for spec in method.processor_specs()]
+        if suite.jersey_diagnostics is not None:
+            config.jersey_diagnostics = suite.jersey_diagnostics.model_copy(deep=True)
         config.models = [model for model in config.models if not models or model.id in models]
         for model in config.models:
             model.devices = [device]
@@ -106,7 +120,9 @@ def expand_screening(
         for spec in config.processors:
             if spec.type == "crop":
                 spec.params["detector"]["device"] = str(device)
-        expanded[method.name] = config
+        # Assignment to a copied model does not rerun cross-field validators.
+        # Validate the final chain just as loading its exported YAML would.
+        expanded[method.name] = ExperimentConfig.model_validate(config.model_dump())
     return suite, expanded
 
 
@@ -201,6 +217,8 @@ def comparison_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
                 "preprocessing_wall_seconds": summary.get("preprocessing_wall_seconds"),
                 "artifact_processing_seconds": summary.get("artifact_processing_seconds"),
                 "preprocessing_cache_hit": summary.get("cache_hit"),
+                "jersey_diagnostics": summary.get("jersey_diagnostics", {}).get("manifest"),
+                "jersey_diagnostics_seconds": summary.get("jersey_diagnostics", {}).get("wall_seconds"),
                 "video_render_seconds": timings.get("video_render_seconds"),
                 "condition_wall_seconds": condition.get("wall_seconds"),
                 "video": outputs.get("video"),
@@ -228,7 +246,7 @@ def write_comparison(root: Path, report: dict[str, Any]) -> None:
                "preprocessing_wall_seconds", "preprocessing_cache_hit"]
     headings = ["Method", "Model", "Status", "Raw", "On pitch", "Δ on pitch %",
                 "Raw/frame", "Model s", "Δ time %", "Source fps", "Preproc s", "Cache hit"]
-    text = ["# Single-step preprocessing comparison", "",
+    text = ["# Preprocessing comparison", "",
             "Raw/on-pitch counts are yield diagnostics, not accuracy. Percentages use the same model's baseline.",
             "Model time includes container startup and input decoding. Preprocessing is shared across models.",
             "Cold materialization and warm-cache wall times are not interchangeable. See CSV/JSON for all timings and videos.",
@@ -265,13 +283,14 @@ def run_screening(
         "input_sha256": sha256_file(configs["baseline"].input),
         "model_ids": [model.id for model in configs["baseline"].models],
         "conditions": [{"method": name, "status": "PENDING"} for name in configs],
-        "note": "Single-factor yield/runtime screening, not ground-truth pose accuracy.",
+        "note": "Preprocessing yield/runtime screening, not ground-truth pose accuracy.",
     }
+    video_group = "composite" if any(len(config.processors) > 1 for config in configs.values()) else "single-step"
     # Pin checkpoint contents alongside expanded YAML, before starting any condition.
     checkpoints = set()
     for name, config in configs.items():
         config.output_dir = root / name
-        config.video_output.root = config.video_output.root / "single-step" / run_id
+        config.video_output.root = config.video_output.root / video_group / run_id
         payload = config.model_dump(mode="json")
         (root / "configs" / f"{name}.yaml").write_text(yaml.safe_dump(payload, sort_keys=False))
         def collect(value: Any) -> None:
